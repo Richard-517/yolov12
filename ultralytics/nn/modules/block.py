@@ -1403,3 +1403,48 @@ class DS_A2C2f(nn.Module):
         y_ds = torch.cat([self.ds_h(x), self.ds_v(x)], dim=1)
         y_ds = self.ds_act(self.ds_bn(self.ds_fuse(y_ds)))
         return y_main + self.ds_weight * y_ds
+
+
+class BiFPN_Add2(nn.Module):
+    """Weighted bidirectional feature fusion for 2 inputs (CMDrill-YOLOv12, M2).
+
+    Each input is projected to c2 via a 1x1 Conv, then summed with learnable
+    weights normalized via ReLU. Handles mixed input channel counts.
+    """
+
+    def __init__(self, c1_list, c2):
+        super().__init__()
+        if not isinstance(c1_list, (list, tuple)) or len(c1_list) != 2:
+            raise ValueError(f"BiFPN_Add2 expects c1_list of length 2, got {c1_list}")
+        self.proj = nn.ModuleList([Conv(c, c2, k=1, s=1, p=0) for c in c1_list])
+        self.w = nn.Parameter(torch.ones(2, dtype=torch.float32))
+        self.eps = 1e-4
+        self.act = nn.SiLU()
+
+    def forward(self, x):
+        w = F.relu(self.w)
+        w = w / (w.sum() + self.eps)
+        p0 = self.proj[0](x[0])
+        p1 = self.proj[1](x[1])
+        return self.act(w[0] * p0 + w[1] * p1)
+
+
+class BiFPN_Add3(nn.Module):
+    """Weighted bidirectional feature fusion for 3 inputs (CMDrill-YOLOv12, M2)."""
+
+    def __init__(self, c1_list, c2):
+        super().__init__()
+        if not isinstance(c1_list, (list, tuple)) or len(c1_list) != 3:
+            raise ValueError(f"BiFPN_Add3 expects c1_list of length 3, got {c1_list}")
+        self.proj = nn.ModuleList([Conv(c, c2, k=1, s=1, p=0) for c in c1_list])
+        self.w = nn.Parameter(torch.ones(3, dtype=torch.float32))
+        self.eps = 1e-4
+        self.act = nn.SiLU()
+
+    def forward(self, x):
+        w = F.relu(self.w)
+        w = w / (w.sum() + self.eps)
+        p0 = self.proj[0](x[0])
+        p1 = self.proj[1](x[1])
+        p2 = self.proj[2](x[2])
+        return self.act(w[0] * p0 + w[1] * p1 + w[2] * p2)

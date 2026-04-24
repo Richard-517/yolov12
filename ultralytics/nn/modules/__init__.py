@@ -59,6 +59,8 @@ from .block import (
     TorchVision,
     A2C2f,
     DS_A2C2f,
+    BiFPN_Add2,
+    BiFPN_Add3,
 )
 from .conv import (
     CBAM,
@@ -164,4 +166,6 @@ __all__ = (
     "Index",
     "A2C2f",
     "DS_A2C2f",
+    "BiFPN_Add2",
+    "BiFPN_Add3",
 )

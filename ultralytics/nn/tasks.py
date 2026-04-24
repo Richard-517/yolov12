@@ -66,6 +66,8 @@ from ultralytics.nn.modules import (
     v10Detect,
     A2C2f,
     DS_A2C2f,
+    BiFPN_Add2,
+    BiFPN_Add3,
 )
 from ultralytics.utils import DEFAULT_CFG_DICT, DEFAULT_CFG_KEYS, LOGGER, colorstr, emojis, yaml_load
 from ultralytics.utils.checks import check_requirements, check_suffix, check_yaml
@@ -1058,6 +1060,12 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
             args = [ch[f]]
         elif m is Concat:
             c2 = sum(ch[x] for x in f)
+        elif m in {BiFPN_Add2, BiFPN_Add3}:
+            c1_list = [ch[x] for x in f]
+            c2 = args[0]
+            if c2 != nc:
+                c2 = make_divisible(min(c2, max_channels) * width, 8)
+            args = [c1_list, c2]
         elif m in {Detect, WorldDetect, Segment, Pose, OBB, ImagePoolingAttn, v10Detect}:
             args.append([ch[x] for x in f])
             if m is Segment:
