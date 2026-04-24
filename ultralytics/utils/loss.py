@@ -9,7 +9,7 @@ from ultralytics.utils.ops import crop_mask, xywh2xyxy, xyxy2xywh
 from ultralytics.utils.tal import RotatedTaskAlignedAssigner, TaskAlignedAssigner, dist2bbox, dist2rbox, make_anchors
 from ultralytics.utils.torch_utils import autocast
 
-from .metrics import bbox_iou, probiou
+from .metrics import bbox_iou, inner_mpdiou, probiou
 from .tal import bbox2dist
 
 
@@ -89,18 +89,45 @@ class DFLoss(nn.Module):
 
 
 class BboxLoss(nn.Module):
-    """Criterion class for computing training losses during training."""
+    """Criterion class for computing training losses during training.
 
-    def __init__(self, reg_max=16):
-        """Initialize the BboxLoss module with regularization maximum and DFL settings."""
+    Supports the CMDrill-YOLOv12 Inner-MPDIoU loss with CIoU warmup:
+      - iou_type='ciou' (default): original CIoU behavior
+      - iou_type='inner_mpdiou': Inner-MPDIoU with `inner_ratio` scaling
+      - ciou_warmup_epochs: force CIoU for the first N epochs regardless of iou_type
+        (Inner-MPDIoU's point-distance term can be unstable early in training)
+    """
+
+    def __init__(self, reg_max=16, iou_type="ciou", inner_ratio=0.7, ciou_warmup_epochs=0):
+        """Initialize the BboxLoss module."""
         super().__init__()
         self.dfl_loss = DFLoss(reg_max) if reg_max > 1 else None
+        self.iou_type = iou_type
+        self.inner_ratio = inner_ratio
+        self.ciou_warmup_epochs = ciou_warmup_epochs
+        # Updated by the `on_train_epoch_start` callback (see utils/callbacks/base.py).
+        # Default 0 keeps Inner-MPDIoU disabled during warmup; a callback sets this at runtime.
+        self.current_epoch = 0
 
-    def forward(self, pred_dist, pred_bboxes, anchor_points, target_bboxes, target_scores, target_scores_sum, fg_mask):
+    def forward(
+        self, pred_dist, pred_bboxes, anchor_points,
+        target_bboxes, target_scores, target_scores_sum, fg_mask,
+        img_wh=(640, 640),
+    ):
         """IoU loss."""
         weight = target_scores.sum(-1)[fg_mask].unsqueeze(-1)
-        iou = bbox_iou(pred_bboxes[fg_mask], target_bboxes[fg_mask], xywh=False, CIoU=True)
-        loss_iou = ((1.0 - iou) * weight).sum() / target_scores_sum
+        pb = pred_bboxes[fg_mask]
+        tb = target_bboxes[fg_mask]
+
+        use_inner = (self.iou_type == "inner_mpdiou"
+                     and self.current_epoch >= self.ciou_warmup_epochs)
+        if use_inner:
+            iou_value = inner_mpdiou(pb, tb, xywh=False,
+                                     ratio=self.inner_ratio, img_wh=img_wh)
+            loss_iou = ((1.0 - iou_value) * weight.squeeze(-1)).sum() / target_scores_sum
+        else:
+            iou = bbox_iou(pb, tb, xywh=False, CIoU=True)
+            loss_iou = ((1.0 - iou) * weight).sum() / target_scores_sum
 
         # DFL loss
         if self.dfl_loss:
@@ -174,7 +201,15 @@ class v8DetectionLoss:
         self.use_dfl = m.reg_max > 1
 
         self.assigner = TaskAlignedAssigner(topk=tal_topk, num_classes=self.nc, alpha=0.5, beta=6.0)
-        self.bbox_loss = BboxLoss(m.reg_max).to(device)
+        iou_type = getattr(h, "iou_type", "ciou")
+        inner_ratio = getattr(h, "inner_ratio", 0.7)
+        ciou_warmup_epochs = getattr(h, "ciou_warmup_epochs", 0)
+        self.bbox_loss = BboxLoss(
+            m.reg_max,
+            iou_type=iou_type,
+            inner_ratio=inner_ratio,
+            ciou_warmup_epochs=ciou_warmup_epochs,
+        ).to(device)
         self.proj = torch.arange(m.reg_max, dtype=torch.float, device=device)
 
     def preprocess(self, targets, batch_size, scale_tensor):
@@ -250,7 +285,8 @@ class v8DetectionLoss:
         if fg_mask.sum():
             target_bboxes /= stride_tensor
             loss[0], loss[2] = self.bbox_loss(
-                pred_distri, pred_bboxes, anchor_points, target_bboxes, target_scores, target_scores_sum, fg_mask
+                pred_distri, pred_bboxes, anchor_points, target_bboxes, target_scores, target_scores_sum, fg_mask,
+                img_wh=(float(imgsz[1].item()), float(imgsz[0].item())),  # (W, H)
             )
 
         loss[0] *= self.hyp.box  # box gain

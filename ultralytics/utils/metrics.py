@@ -134,6 +134,60 @@ def bbox_iou(box1, box2, xywh=True, GIoU=False, DIoU=False, CIoU=False, eps=1e-7
     return iou  # IoU
 
 
+def inner_mpdiou(box1, box2, xywh=False, ratio=0.7, img_wh=(640, 640), eps=1e-7):
+    """CMDrill-YOLOv12 Inner-MPDIoU (Improvement 3).
+
+    Combines Inner-IoU (arXiv:2311.02877) and MPDIoU (arXiv:2307.07662):
+      - Inner-IoU scales both boxes about their centers by `ratio` before computing IoU,
+        accelerating regression convergence.
+      - MPDIoU adds an L2 penalty on the top-left and bottom-right corner distances,
+        normalized by the input image diagonal.
+
+    Returned value ranges in (-inf, 1], where higher is better — same convention as
+    CIoU/DIoU/GIoU so the caller can use `loss = 1 - inner_mpdiou(...)`.
+
+    Args:
+        box1, box2: (..., 4) tensors in xywh or xyxy format.
+        xywh: True if xywh, False if xyxy (default False — matches BboxLoss call site).
+        ratio: Inner-IoU scaling factor (<1 shrinks the box for harsher gradient; 0.6-0.8 recommended).
+        img_wh: (W, H) of the input image, for MPDIoU diagonal normalization.
+        eps: numerical stability.
+    """
+    if xywh:
+        (x1, y1, w1, h1), (x2, y2, w2, h2) = box1.chunk(4, -1), box2.chunk(4, -1)
+        b1_x1, b1_x2, b1_y1, b1_y2 = x1 - w1 / 2, x1 + w1 / 2, y1 - h1 / 2, y1 + h1 / 2
+        b2_x1, b2_x2, b2_y1, b2_y2 = x2 - w2 / 2, x2 + w2 / 2, y2 - h2 / 2, y2 + h2 / 2
+    else:
+        b1_x1, b1_y1, b1_x2, b1_y2 = box1.chunk(4, -1)
+        b2_x1, b2_y1, b2_x2, b2_y2 = box2.chunk(4, -1)
+        w1, h1 = b1_x2 - b1_x1, b1_y2 - b1_y1
+        w2, h2 = b2_x2 - b2_x1, b2_y2 - b2_y1
+
+    # Inner-IoU: scale both boxes about their centers by `ratio`.
+    cx1, cy1 = (b1_x1 + b1_x2) / 2, (b1_y1 + b1_y2) / 2
+    cx2, cy2 = (b2_x1 + b2_x2) / 2, (b2_y1 + b2_y2) / 2
+    hw1, hh1 = w1 * ratio / 2, h1 * ratio / 2
+    hw2, hh2 = w2 * ratio / 2, h2 * ratio / 2
+    i1_x1, i1_x2, i1_y1, i1_y2 = cx1 - hw1, cx1 + hw1, cy1 - hh1, cy1 + hh1
+    i2_x1, i2_x2, i2_y1, i2_y2 = cx2 - hw2, cx2 + hw2, cy2 - hh2, cy2 + hh2
+    inter_w = (i1_x2.minimum(i2_x2) - i1_x1.maximum(i2_x1)).clamp_(0)
+    inter_h = (i1_y2.minimum(i2_y2) - i1_y1.maximum(i2_y1)).clamp_(0)
+    inter = inter_w * inter_h
+    area1 = (i1_x2 - i1_x1) * (i1_y2 - i1_y1)
+    area2 = (i2_x2 - i2_x1) * (i2_y2 - i2_y1)
+    inner_iou_value = inter / (area1 + area2 - inter + eps)
+
+    # MPDIoU point-distance term (use the *original* boxes, not the inner-scaled).
+    img_w, img_h = img_wh
+    d2 = (
+        (b1_x1 - b2_x1).pow(2) + (b1_y1 - b2_y1).pow(2)
+        + (b1_x2 - b2_x2).pow(2) + (b1_y2 - b2_y2).pow(2)
+    )
+    d2_norm = d2 / (float(img_w) ** 2 + float(img_h) ** 2 + eps)
+
+    return (inner_iou_value - d2_norm).squeeze(-1)
+
+
 def mask_iou(mask1, mask2, eps=1e-7):
     """
     Calculate masks IoU.
