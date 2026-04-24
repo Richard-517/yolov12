@@ -30,9 +30,9 @@ EXPERIMENT_ORDER = [
     "E_M4_seed42",
     "E_M4_seed123",
     "C1_fasterrcnn",
-    "C2_yolov8s",
-    "C3_yolov11s",
-    "C4_rtdetr_r18",
+    "C2_yolov8s_seed42",
+    "C3_yolo11s_seed42",
+    "C4_rtdetr_l_seed42",
 ]
 
 HUMAN_LABEL = {
@@ -44,9 +44,9 @@ HUMAN_LABEL = {
     "E_M4_seed42": "M4 (CMDrill-YOLOv12s, s42)",
     "E_M4_seed123": "M4 (CMDrill-YOLOv12s, s123)",
     "C1_fasterrcnn": "Faster R-CNN (R50)",
-    "C2_yolov8s": "YOLOv8s",
-    "C3_yolov11s": "YOLOv11s",
-    "C4_rtdetr_r18": "RT-DETR-R18",
+    "C2_yolov8s_seed42": "YOLOv8s",
+    "C3_yolo11s_seed42": "YOLOv11s",
+    "C4_rtdetr_l_seed42": "RT-DETR-L",
 }
 
 
@@ -107,7 +107,8 @@ def collect(runs_dir: Path, out_dir: Path) -> None:
     print(f"[done] table2_ablation.csv ({len(ablation)} rows)")
 
     # Comparison table (M0, M4, C1-C4)
-    comparison_keys = ["E0_yolov12s_seed42", "E_M4_seed42", "C1_fasterrcnn", "C2_yolov8s", "C3_yolov11s", "C4_rtdetr_r18"]
+    comparison_keys = ["E0_yolov12s_seed42", "E_M4_seed42", "C1_fasterrcnn",
+                       "C2_yolov8s_seed42", "C3_yolo11s_seed42", "C4_rtdetr_l_seed42"]
     comparison = [r for r in rows if r["exp"] in comparison_keys]
     pd.DataFrame(comparison).to_csv(out_dir / "table3_comparison.csv", index=False)
     print(f"[done] table3_comparison.csv ({len(comparison)} rows)")

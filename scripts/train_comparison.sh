@@ -18,8 +18,8 @@ PROJECT=${PROJECT:-"../runs/cmdrill"}
 
 case "${VARIANT}" in
     C2) CFG="yolov8s.yaml";    NAME="C2_yolov8s" ;;
-    C3) CFG="yolov11s.yaml";   NAME="C3_yolov11s" ;;
-    C4) CFG="rtdetr-r18.yaml"; NAME="C4_rtdetr_r18" ;;
+    C3) CFG="yolo11s.yaml";    NAME="C3_yolo11s" ;;
+    C4) CFG="rtdetr-l.yaml";   NAME="C4_rtdetr_l" ;;
     *)  echo "unknown variant: ${VARIANT}"; exit 1 ;;
 esac
 

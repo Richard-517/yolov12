@@ -24,10 +24,12 @@ log "E_M4_seed42"          && bash scripts/train_ablation.sh  M4 42  2>&1 | tee 
 log "E0_yolov12s_seed123"  && bash scripts/train_baseline.sh      123 2>&1 | tee "$LOG/E0_s123.log"
 log "E_M4_seed123"         && bash scripts/train_ablation.sh  M4 123 2>&1 | tee "$LOG/E_M4_seed123.log"
 
-# YOLO-family comparisons (base env, ultralytics native)
+# YOLO-family comparisons (base env, ultralytics native).
+# Note: ultralytics ships yolo11s.yaml (not yolov11s.yaml) and rtdetr-l.yaml
+# (no R18 variant; we use the closest `l` variant, naming the run to reflect that).
 log "C2_yolov8s"           && bash scripts/train_comparison.sh C2 42 2>&1 | tee "$LOG/C2.log"
-log "C3_yolov11s"          && bash scripts/train_comparison.sh C3 42 2>&1 | tee "$LOG/C3.log"
-log "C4_rtdetr_r18"        && bash scripts/train_comparison.sh C4 42 2>&1 | tee "$LOG/C4.log"
+log "C3_yolo11s"           && bash scripts/train_comparison.sh C3 42 2>&1 | tee "$LOG/C3.log"
+log "C4_rtdetr_l"          && bash scripts/train_comparison.sh C4 42 2>&1 | tee "$LOG/C4.log"
 
 # Faster R-CNN (separate stack)
 log "C1_fasterrcnn"        && conda activate yolov12_base && python scripts/train_fasterrcnn.py \
