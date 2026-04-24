@@ -9,8 +9,22 @@ set -e
 source /root/anaconda3/etc/profile.d/conda.sh
 cd ~/cmdrill-yolov12/yolov12_ours
 LOG=~/cmdrill-yolov12/logs
+RUNS=~/cmdrill-yolov12/runs/cmdrill
+BASELINE_RUN="${RUNS}/E0_yolov12s_seed42"
+# mAP@0.5 regression tolerance — if an ablation is this many points below baseline
+# (default 0.005 = 0.5pp, within typical seed-noise), treat as regression and stop.
+# Override with: TOLERANCE=0.01 bash scripts/train_all_remaining.sh
+TOLERANCE="${TOLERANCE:-0.005}"
 
 log() { echo "=== $(date +%H:%M:%S) :: $* ==="; }
+check_regression() {
+    local run_name="$1"
+    log "check vs E0 baseline (tolerance=${TOLERANCE})"
+    python scripts/check_improvement.py \
+        --exp "${RUNS}/${run_name}" \
+        --baseline "${BASELINE_RUN}" \
+        --tolerance "${TOLERANCE}"
+}
 
 log "START queue"
 log "git pull (pick up any last-minute fixes)"
@@ -18,11 +32,19 @@ git stash 2>/dev/null || true
 git pull origin cmdrill-dev 2>&1 | tail -5
 chmod +x scripts/*.sh
 
-# Ablations (yolov12_ours env)
+# Ablations (yolov12_ours env) — each gated by regression check against E0.
+# `set -e` ensures check_improvement.py exit != 0 aborts the queue.
 log "E_M1_seed42"          && bash scripts/train_ablation.sh  M1 42  2>&1 | tee "$LOG/E_M1_seed42.log"
+check_regression  "E_M1_seed42"
+
 log "E_M2_seed42"          && bash scripts/train_ablation.sh  M2 42  2>&1 | tee "$LOG/E_M2_seed42.log"
+check_regression  "E_M2_seed42"
+
 log "E_M3_seed42"          && bash scripts/train_ablation.sh  M3 42  2>&1 | tee "$LOG/E_M3_seed42.log"
+check_regression  "E_M3_seed42"
+
 log "E_M4_seed42"          && bash scripts/train_ablation.sh  M4 42  2>&1 | tee "$LOG/E_M4_seed42.log"
+check_regression  "E_M4_seed42"
 
 # Stability seeds
 log "E0_yolov12s_seed123"  && bash scripts/train_baseline.sh      123 2>&1 | tee "$LOG/E0_s123.log"
