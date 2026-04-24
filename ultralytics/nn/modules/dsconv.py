@@ -68,8 +68,6 @@ class DSConv(nn.Module):
             )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        device = x.device
-
         offset = self.offset_conv(x)
         offset = self.gn_offset(offset)
         offset = self.tanh(offset)
@@ -78,7 +76,8 @@ class DSConv(nn.Module):
             offset=offset,
             morph=self.morph,
             extend_scope=self.extend_scope,
-            device=device,
+            device=x.device,
+            dtype=x.dtype,
         )
         deformed = _get_interpolated_feature(x, y_coord, x_coord)
         out = self.dsc_conv(deformed)
@@ -92,9 +91,14 @@ def _get_coordinate_map_2d(
     morph: int,
     extend_scope: float,
     device: torch.device,
+    dtype: torch.dtype = torch.float32,
 ):
     """Compute 2D coordinate maps for snake sampling. Note: DSCNet upstream uses (width, height)
-    naming for the last two spatial dims; we keep that for fidelity, but the PyTorch layout is still (B, C, H, W)."""
+    naming for the last two spatial dims; we keep that for fidelity, but the PyTorch layout is still (B, C, H, W).
+
+    `dtype` should match the input tensor dtype so that the coordinate grid is compatible with
+    grid_sample (which rejects dtype mismatches between `input` and `grid`).
+    """
     if morph not in (0, 1):
         raise ValueError("morph should be 0 or 1.")
 
@@ -104,15 +108,15 @@ def _get_coordinate_map_2d(
 
     y_offset_, x_offset_ = torch.split(offset, kernel_size, dim=1)
 
-    y_center_ = torch.arange(0, width, dtype=torch.float32, device=device)
+    y_center_ = torch.arange(0, width, dtype=dtype, device=device)
     y_center_ = einops.repeat(y_center_, "w -> k w h", k=kernel_size, h=height)
 
-    x_center_ = torch.arange(0, height, dtype=torch.float32, device=device)
+    x_center_ = torch.arange(0, height, dtype=dtype, device=device)
     x_center_ = einops.repeat(x_center_, "h -> k w h", k=kernel_size, w=width)
 
     if morph == 0:
-        y_spread_ = torch.zeros([kernel_size], device=device)
-        x_spread_ = torch.linspace(-center, center, kernel_size, device=device)
+        y_spread_ = torch.zeros([kernel_size], dtype=dtype, device=device)
+        x_spread_ = torch.linspace(-center, center, kernel_size, dtype=dtype, device=device)
 
         y_grid_ = einops.repeat(y_spread_, "k -> k w h", w=width, h=height)
         x_grid_ = einops.repeat(x_spread_, "k -> k w h", w=width, h=height)
@@ -136,8 +140,8 @@ def _get_coordinate_map_2d(
         y_coordinate_map = einops.rearrange(y_new_, "b k w h -> b (w k) h")
         x_coordinate_map = einops.rearrange(x_new_, "b k w h -> b (w k) h")
     else:
-        y_spread_ = torch.linspace(-center, center, kernel_size, device=device)
-        x_spread_ = torch.zeros([kernel_size], device=device)
+        y_spread_ = torch.linspace(-center, center, kernel_size, dtype=dtype, device=device)
+        x_spread_ = torch.zeros([kernel_size], dtype=dtype, device=device)
 
         y_grid_ = einops.repeat(y_spread_, "k -> k w h", w=width, h=height)
         x_grid_ = einops.repeat(x_spread_, "k -> k w h", w=width, h=height)
