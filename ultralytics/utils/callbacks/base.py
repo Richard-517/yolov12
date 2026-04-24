@@ -23,8 +23,18 @@ def on_train_start(trainer):
 
 
 def on_train_epoch_start(trainer):
-    """Called at the start of each training epoch."""
-    pass
+    """Called at the start of each training epoch.
+
+    CMDrill-YOLOv12 Inner-MPDIoU/CIoU warmup: sync the current epoch to BboxLoss
+    so the loss can decide whether to run CIoU (during warmup) or Inner-MPDIoU.
+    Safe no-op if trainer lacks criterion or BboxLoss lacks the attribute.
+    """
+    criterion = getattr(trainer, "criterion", None)
+    if criterion is None:
+        return
+    bbox_loss = getattr(criterion, "bbox_loss", None)
+    if bbox_loss is not None and hasattr(bbox_loss, "current_epoch"):
+        bbox_loss.current_epoch = int(getattr(trainer, "epoch", 0))
 
 
 def on_train_batch_start(trainer):
