@@ -1379,7 +1379,7 @@ class DS_A2C2f(nn.Module):
 
     def __init__(self, c1, c2, n=1, a2=True, area=1, residual=False,
                  mlp_ratio=2.0, e=0.5, g=1, shortcut=True,
-                 ds_weight=0.3, ds_kernel=9):
+                 ds_weight=0.3, ds_kernel=3):
         super().__init__()
         from .dsconv import DSConv
 

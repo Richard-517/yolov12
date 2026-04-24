@@ -30,7 +30,7 @@ class DSConv(nn.Module):
         self,
         in_channels: int,
         out_channels: int,
-        kernel_size: int = 9,
+        kernel_size: int = 3,
         extend_scope: float = 1.0,
         morph: int = 0,
         if_offset: bool = True,
@@ -52,18 +52,20 @@ class DSConv(nn.Module):
 
         self.offset_conv = nn.Conv2d(in_channels, 2 * kernel_size, 3, padding=1)
 
-        self.dsc_conv_x = nn.Conv2d(
-            in_channels, out_channels,
-            kernel_size=(kernel_size, 1),
-            stride=(kernel_size, 1),
-            padding=0,
-        )
-        self.dsc_conv_y = nn.Conv2d(
-            in_channels, out_channels,
-            kernel_size=(1, kernel_size),
-            stride=(1, kernel_size),
-            padding=0,
-        )
+        if morph == 0:
+            self.dsc_conv = nn.Conv2d(
+                in_channels, out_channels,
+                kernel_size=(kernel_size, 1),
+                stride=(kernel_size, 1),
+                padding=0,
+            )
+        else:
+            self.dsc_conv = nn.Conv2d(
+                in_channels, out_channels,
+                kernel_size=(1, kernel_size),
+                stride=(1, kernel_size),
+                padding=0,
+            )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         device = x.device
@@ -79,12 +81,7 @@ class DSConv(nn.Module):
             device=device,
         )
         deformed = _get_interpolated_feature(x, y_coord, x_coord)
-
-        if self.morph == 0:
-            out = self.dsc_conv_x(deformed)
-        else:
-            out = self.dsc_conv_y(deformed)
-
+        out = self.dsc_conv(deformed)
         out = self.gn(out)
         out = self.relu(out)
         return out
