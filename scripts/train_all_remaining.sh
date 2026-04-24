@@ -13,6 +13,10 @@ LOG=~/cmdrill-yolov12/logs
 log() { echo "=== $(date +%H:%M:%S) :: $* ==="; }
 
 log "START queue"
+log "git pull (pick up any last-minute fixes)"
+git stash 2>/dev/null || true
+git pull origin cmdrill-dev 2>&1 | tail -5
+chmod +x scripts/*.sh
 
 # Ablations (yolov12_ours env)
 log "E_M1_seed42"          && bash scripts/train_ablation.sh  M1 42  2>&1 | tee "$LOG/E_M1_seed42.log"
