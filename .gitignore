@@ -4,3 +4,6 @@ runs/
 wandb/
 *.pt
 *.pth
+*.egg-info/
+.idea/
+.venv/
