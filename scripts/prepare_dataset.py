@@ -1,31 +1,35 @@
 """Prepare the DsDPM 66 dataset for YOLOv12 training.
 
-DsDPM 66 is distributed in *two* figshare uploads due to the per-article
-storage cap. This script merges both parts into a single
-`images/{train,val}` + `labels/{train,val}` layout and emits `dsdpm66.yaml`.
+Each per-class upload (2026-04-24 verified) lays out:
+
+    {class_name}/
+    +-- images/{train,val}/*.jpg
+    +-- YOLO_labels/{train,val}/*.txt
+    +-- COCO_annotations/*.json
+
+YOLO labels use class_id=0 (per-class single-class labeling) for 5 of the 6 classes.
+The interaction class uses *two* internal ids (0 and 1), both of which we collapse
+into the canonical "miner_drillpipe_interaction" id=5.
+
+This script:
+  1. Validates every class folder under --raw has the expected layout.
+  2. For each image, rewrites the paired label with the canonical class id.
+  3. Moves the image to {out}/images/{split}/ with a `{class}_` filename prefix,
+     and the rewritten label to {out}/labels/{split}/.
+  4. Emits {out}/../dsdpm66.yaml.
+
+Using `move` (not copy) keeps peak disk usage flat.
 
 Usage:
-    # 1. Look at the raw structure without moving files (safe):
-    python scripts/prepare_dataset.py --root /root/cmdrill-yolov12/datasets --inspect
-
-    # 2. After confirming the mapping is correct, process:
-    python scripts/prepare_dataset.py --root /root/cmdrill-yolov12/datasets --run
-
-The six canonical class IDs for this project (fixed in CLAUDE.md):
-
-    0: coal_miner
-    1: compressed_oxygen_self_rescuer
-    2: mining_helmet
-    3: drill_pipe
-    4: drill_rig
-    5: miner_drillpipe_interaction
+    python scripts/prepare_dataset.py --raw /root/cmdrill-yolov12/datasets/raw --out /root/cmdrill-yolov12/datasets/DsDPM66
+    python scripts/prepare_dataset.py --raw ... --out ... --dry-run    # plan only, no moves
 """
 
 from __future__ import annotations
 
 import argparse
 import shutil
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 
 CANONICAL_CLASSES = [
@@ -37,146 +41,114 @@ CANONICAL_CLASSES = [
     "miner_drillpipe_interaction",
 ]
 
+# Map the upstream per-class folder name to this project's canonical id.
+# The interaction folder uses 2 internal ids (0 and 1), both -> 5.
+FOLDER_TO_CANONICAL_ID = {
+    "coal_miner": 0,
+    "compressed_oxygen_self_rescuer": 1,
+    "mining_helmet": 2,
+    "drill_pipe": 3,
+    "drill_rig": 4,
+    "interaction_between_miner_and_drill_pipe": 5,
+}
 
-def inspect(root: Path) -> None:
-    """Walk the raw DsDPM66 directory and report the layout the author used.
 
-    We cannot guarantee the upstream layout — this is our safety check before doing
-    anything destructive. Print the directory tree up to depth 3 and sample the
-    first 10 lines of each label-like file."""
-    print(f"[inspect] root = {root}")
-    for path in sorted(root.rglob("*"))[:500]:
-        rel = path.relative_to(root)
-        depth = len(rel.parts)
-        if depth > 3:
+def rewrite_label_text(label_text: str, target_id: int) -> str:
+    """Replace every line's leading class_id with `target_id`, keep bbox fields intact."""
+    out_lines: list[str] = []
+    for raw_line in label_text.splitlines():
+        parts = raw_line.split()
+        if len(parts) < 5:
             continue
-        marker = "/" if path.is_dir() else ""
-        print(f"  {'  ' * depth}{rel.name}{marker}")
-
-    print("\n[inspect] sample label files:")
-    sample_count = 0
-    for lbl in root.rglob("*.txt"):
-        if sample_count >= 5:
-            break
-        if lbl.stat().st_size > 0:
-            print(f"  --- {lbl.relative_to(root)} ---")
-            with lbl.open() as f:
-                for i, line in enumerate(f):
-                    if i >= 10:
-                        break
-                    print(f"    {line.rstrip()}")
-            sample_count += 1
-
-    print("\n[inspect] label class-id distribution (global scan):")
-    class_counter: Counter[str] = Counter()
-    for lbl in root.rglob("*.txt"):
-        try:
-            with lbl.open() as f:
-                for line in f:
-                    parts = line.split()
-                    if parts:
-                        class_counter[parts[0]] += 1
-        except Exception:
-            continue
-    for cid, n in sorted(class_counter.items(), key=lambda x: int(x[0]) if x[0].isdigit() else 999):
-        print(f"  class_id={cid}  count={n}")
-
-    print("\n[inspect] Review the output above before running with --run.")
-    print("[inspect] If class_ids already match the canonical 0..5 mapping, no remap is needed.")
-    print("[inspect] If they reset to 0 per part, the --run step will ask you to confirm the folder-to-id mapping.")
+        parts[0] = str(target_id)
+        out_lines.append(" ".join(parts))
+    if not out_lines:
+        return ""
+    return "\n".join(out_lines) + "\n"
 
 
-def collect_images_and_labels(root: Path) -> list[tuple[Path, Path, str]]:
-    """Walk the raw root and return a list of (image_path, label_path, split) tuples.
-
-    This assumes an upstream convention like:
-        PartA/images/train/*.jpg, PartA/labels/train/*.txt
-        PartA/images/val/*.jpg,   PartA/labels/val/*.txt
-        PartB/...
-
-    If the upstream used different folder names we will need to adjust after inspection."""
-    pairs: list[tuple[Path, Path, str]] = []
-    for img_dir in root.rglob("images"):
-        if not img_dir.is_dir():
-            continue
-        parent = img_dir.parent
-        lbl_dir = parent / "labels"
-        if not lbl_dir.is_dir():
-            continue
-        for split_sub in ("train", "val"):
-            img_split = img_dir / split_sub
-            lbl_split = lbl_dir / split_sub
-            if not img_split.is_dir() or not lbl_split.is_dir():
-                continue
-            for img in img_split.iterdir():
-                if img.suffix.lower() not in {".jpg", ".jpeg", ".png"}:
-                    continue
-                lbl = lbl_split / (img.stem + ".txt")
-                if not lbl.exists():
-                    print(f"[warn] missing label: {lbl}")
-                    continue
-                pairs.append((img, lbl, split_sub))
-    return pairs
-
-
-def run(root: Path, out_dir: Path, dry_run: bool = False) -> None:
-    """Merge parts, copy images+labels into canonical YOLO layout, emit yaml."""
-    out_dir.mkdir(parents=True, exist_ok=True)
+def process(raw: Path, out: Path, dry_run: bool) -> None:
+    assert raw.is_dir(), f"{raw} not a directory"
     for sub in ("images/train", "images/val", "labels/train", "labels/val"):
-        (out_dir / sub).mkdir(parents=True, exist_ok=True)
+        (out / sub).mkdir(parents=True, exist_ok=True)
 
-    pairs = collect_images_and_labels(root)
-    print(f"[run] found {len(pairs)} image-label pairs across the raw tree")
+    per_class_totals: dict[str, dict[str, int]] = defaultdict(lambda: {"train": 0, "val": 0, "inst": 0})
+    skipped: list[str] = []
 
-    split_counts = Counter(s for _, _, s in pairs)
-    print(f"[run] split distribution: {dict(split_counts)}")
-
-    for img, lbl, split in pairs:
-        dst_img = out_dir / "images" / split / img.name
-        dst_lbl = out_dir / "labels" / split / lbl.name
-        if dry_run:
+    for folder_name, target_id in FOLDER_TO_CANONICAL_ID.items():
+        folder = raw / folder_name
+        if not folder.is_dir():
+            print(f"[warn] missing class folder: {folder_name} (skipping)")
             continue
-        if not dst_img.exists():
-            shutil.copy2(img, dst_img)
-        if not dst_lbl.exists():
-            shutil.copy2(lbl, dst_lbl)
+        for split in ("train", "val"):
+            img_dir = folder / "images" / split
+            lbl_dir = folder / "YOLO_labels" / split
+            if not img_dir.is_dir() or not lbl_dir.is_dir():
+                print(f"[warn] missing {img_dir} or {lbl_dir}, skipping split")
+                continue
 
-    # dsdpm66.yaml
-    yaml_path = out_dir.parent / "dsdpm66.yaml"
-    yaml_text = [
-        f"path: {out_dir}",
+            imgs = sorted(p for p in img_dir.iterdir() if p.suffix.lower() in {".jpg", ".jpeg", ".png"})
+            print(f"[info] {folder_name}/{split}: {len(imgs)} images -> canonical id {target_id}")
+
+            for img in imgs:
+                lbl = lbl_dir / (img.stem + ".txt")
+                if not lbl.exists():
+                    skipped.append(f"no-label: {img}")
+                    continue
+
+                new_name = f"{folder_name}_{img.stem}"
+                dst_img = out / "images" / split / f"{new_name}{img.suffix}"
+                dst_lbl = out / "labels" / split / f"{new_name}.txt"
+
+                label_text = lbl.read_text()
+                n_lines = sum(1 for line in label_text.splitlines() if len(line.split()) >= 5)
+                per_class_totals[folder_name]["inst"] += n_lines
+
+                if dry_run:
+                    continue
+
+                if not dst_img.exists():
+                    shutil.move(str(img), str(dst_img))
+                if not dst_lbl.exists():
+                    dst_lbl.write_text(rewrite_label_text(label_text, target_id))
+
+                per_class_totals[folder_name][split] += 1
+
+    print("\n=== summary ===")
+    for folder, counts in per_class_totals.items():
+        print(f"{folder:45s}  train={counts['train']:>6d}  val={counts['val']:>6d}  inst={counts['inst']:>6d}")
+    if skipped:
+        print(f"\n[warn] skipped {len(skipped)} files, first 5: {skipped[:5]}")
+
+    if dry_run:
+        print("\n[dry-run] no files actually moved.")
+        return
+
+    # dsdpm66.yaml sits next to the DsDPM66 data directory.
+    yaml_path = out.parent / "dsdpm66.yaml"
+    yaml_body = [
+        f"path: {out}",
         "train: images/train",
         "val: images/val",
         "nc: 6",
         "names:",
     ]
     for i, name in enumerate(CANONICAL_CLASSES):
-        yaml_text.append(f"  {i}: {name}")
-    if not dry_run:
-        yaml_path.write_text("\n".join(yaml_text) + "\n")
-    print(f"[run] wrote {yaml_path}")
+        yaml_body.append(f"  {i}: {name}")
+    yaml_path.write_text("\n".join(yaml_body) + "\n")
+    print(f"\n[done] wrote {yaml_path}")
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="Prepare DsDPM66 for YOLOv12 training.")
-    p.add_argument("--root", type=Path, required=True,
-                   help="Directory that contains the raw PartA/PartB unpacked folders.")
-    p.add_argument("--out", type=Path, default=None,
-                   help="Where to place the canonical layout (default: {root}/DsDPM66).")
-    mode = p.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--inspect", action="store_true",
-                      help="Only scan and print; no files are moved.")
-    mode.add_argument("--run", action="store_true",
-                      help="Copy images/labels into the canonical YOLO layout and emit dsdpm66.yaml.")
+    p = argparse.ArgumentParser()
+    p.add_argument("--raw", type=Path, required=True,
+                   help="Directory containing the 6 per-class subfolders.")
+    p.add_argument("--out", type=Path, required=True,
+                   help="Output canonical DsDPM66 layout.")
     p.add_argument("--dry-run", action="store_true",
-                   help="With --run, print the plan without copying.")
+                   help="Scan and report but do not move files.")
     args = p.parse_args()
-
-    if args.inspect:
-        inspect(args.root)
-    elif args.run:
-        out_dir = args.out or (args.root / "DsDPM66")
-        run(args.root, out_dir, dry_run=args.dry_run)
+    process(args.raw.resolve(), args.out.resolve(), args.dry_run)
 
 
 if __name__ == "__main__":
