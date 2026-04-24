@@ -1367,3 +1367,39 @@ class A2C2f(nn.Module):
         if self.gamma is not None:
             return x + self.gamma.view(1, -1, 1, 1) * self.cv2(torch.cat(y, 1))
         return self.cv2(torch.cat(y, 1))
+
+
+class DS_A2C2f(nn.Module):
+    """DSConv-augmented Area Attention C2f (CMDrill-YOLOv12, Improvement 1).
+
+    Runs the original A2C2f main path and a parallel dual-direction DSConv branch
+    (horizontal + vertical snake). The branch output is fused back via a learnable
+    scalar ds_weight. Output shape is identical to A2C2f(c1, c2).
+    """
+
+    def __init__(self, c1, c2, n=1, a2=True, area=1, residual=False,
+                 mlp_ratio=2.0, e=0.5, g=1, shortcut=True,
+                 ds_weight=0.3, ds_kernel=9):
+        super().__init__()
+        from .dsconv import DSConv
+
+        self.main = A2C2f(c1, c2, n=n, a2=a2, area=area, residual=residual,
+                          mlp_ratio=mlp_ratio, e=e, g=g, shortcut=shortcut)
+
+        self.ds_h = DSConv(in_channels=c1, out_channels=c2,
+                           kernel_size=ds_kernel, extend_scope=1.0,
+                           morph=0, if_offset=True)
+        self.ds_v = DSConv(in_channels=c1, out_channels=c2,
+                           kernel_size=ds_kernel, extend_scope=1.0,
+                           morph=1, if_offset=True)
+        self.ds_fuse = nn.Conv2d(2 * c2, c2, kernel_size=1, bias=False)
+        self.ds_bn = nn.BatchNorm2d(c2)
+        self.ds_act = nn.SiLU()
+
+        self.ds_weight = nn.Parameter(torch.tensor(float(ds_weight)))
+
+    def forward(self, x):
+        y_main = self.main(x)
+        y_ds = torch.cat([self.ds_h(x), self.ds_v(x)], dim=1)
+        y_ds = self.ds_act(self.ds_bn(self.ds_fuse(y_ds)))
+        return y_main + self.ds_weight * y_ds

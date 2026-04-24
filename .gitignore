@@ -1,1 +1,6 @@
 *__pycache__/
+external/
+runs/
+wandb/
+*.pt
+*.pth
