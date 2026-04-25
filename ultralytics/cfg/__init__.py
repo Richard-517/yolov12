@@ -178,6 +178,7 @@ CFG_FRACTION_KEYS = {  # fractional float arguments with 0.0<=values<=1.0
     "conf",
     "iou",
     "fraction",
+    "inner_ratio",  # CMDrill-YOLOv12 Inner-IoU auxiliary box ratio
 }
 CFG_INT_KEYS = {  # integer-only arguments
     "epochs",
@@ -191,6 +192,7 @@ CFG_INT_KEYS = {  # integer-only arguments
     "line_width",
     "nbs",
     "save_period",
+    "ciou_warmup_epochs",  # CMDrill-YOLOv12 CIoU warmup before switching to Inner-MPDIoU
 }
 CFG_BOOL_KEYS = {  # boolean-only arguments
     "save",

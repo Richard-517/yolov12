@@ -32,8 +32,16 @@ git stash 2>/dev/null || true
 git pull origin cmdrill-dev 2>&1 | tail -5
 chmod +x scripts/*.sh
 
-# Ablations (yolov12_ours env) — each gated by regression check against E0.
+# Ablations (yolov12_ours env) — each gated by a regression check against E0.
 # `set -e` ensures check_improvement.py exit != 0 aborts the queue.
+#
+# Ordering rationale: M4 is the full method, so it answers the most important
+# question first ("does our combined design beat baseline?"). If M4 fails the
+# regression check, the queue stops before wasting GPU on the per-improvement
+# ablations. If M4 passes, M1/M2/M3 fill out the ablation table.
+log "E_M4_seed42"          && bash scripts/train_ablation.sh  M4 42  2>&1 | tee "$LOG/E_M4_seed42.log"
+check_regression  "E_M4_seed42"
+
 log "E_M1_seed42"          && bash scripts/train_ablation.sh  M1 42  2>&1 | tee "$LOG/E_M1_seed42.log"
 check_regression  "E_M1_seed42"
 
@@ -42,9 +50,6 @@ check_regression  "E_M2_seed42"
 
 log "E_M3_seed42"          && bash scripts/train_ablation.sh  M3 42  2>&1 | tee "$LOG/E_M3_seed42.log"
 check_regression  "E_M3_seed42"
-
-log "E_M4_seed42"          && bash scripts/train_ablation.sh  M4 42  2>&1 | tee "$LOG/E_M4_seed42.log"
-check_regression  "E_M4_seed42"
 
 # Stability seeds
 log "E0_yolov12s_seed123"  && bash scripts/train_baseline.sh      123 2>&1 | tee "$LOG/E0_s123.log"
