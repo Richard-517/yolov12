@@ -147,18 +147,178 @@ else:
 
 ---
 
-## 6. Fallback 切换路径
+## 6. Fallback 切换路径(**完整链表,绝不偏离**)
 
-当 KILL 触发,根据当前是哪个 ablation 决定下一步:
+监控代理**只能执行下表里已经预定义的命令**,**不得**自主设计任何新 fallback、改 hyperparam、改 batch、动 YAML、写新模块。下表覆盖了所有授权的状态转移。
 
-| 当前 KILL | 自动启动的 fallback | 执行命令 |
+### 6.0 状态机(顺序流转)
+
+```
+M3      ─┬─ best ≥ 0.6502 → 进 M1                             [PASS, 走主线]
+         ├─ KILL/regression → 进 M3W                            [LOSS-LEVEL FALLBACK]
+         └─ M3W KILL/regression → 标记 LOSS_DEAD,跳到 M1       [放弃 loss 创新]
+
+M1      ─┬─ best ≥ 0.6502 → 进 M4                             [PASS]
+         └─ KILL/regression → 标记 BACKBONE_DEAD,跳到 M4       [放弃 backbone 创新]
+
+M4      ─┬─ best ≥ 0.6502 → 进稳定性 + 对比阶段                 [PASS]
+         ├─ KILL/regression → 进 M4W                            [LOSS-LEVEL FALLBACK]
+         └─ M4W KILL/regression → 全部失败,执行 §6.4 全停        [HARD STOP]
+
+稳定性 (E0_s123, E_M4_s123)
+        └─ 仅在主 ablation 至少一个 PASS 时才跑;否则 §6.4 跳过
+
+对比 (C1, C2, C3, C4)
+        └─ 仅在主 ablation 至少一个 PASS 时才跑;否则 §6.4 跳过
+```
+
+### 6.1 KILL 后单步执行命令(查表用)
+
+| 当前被 KILL | 下一步动作 | 执行命令(完整) |
 |:---|:---|:---|
-| **E_M3_seed42** | E_M3W(WIoU) | 见 §6.1 |
-| **E_M3W_seed42** | 跳到 M1 | `tmux kill ; bash scripts/train_all_remaining.sh`(M3W 不在 queue 内,M3 跑完进 M1) |
-| **E_M1_seed42** | 无简单 fallback,**停 + 报警** | 仅记录;用户介入 |
-| **E_M4_seed42** | E_M4W(WIoU 替换 Inner-MPDIoU) | 类似 M3 → M3W |
-| **E_M4W_seed42** | 停 + 报警 | 仅记录 |
-| 稳定性/对比实验 | **不 KILL**(无论好坏都要跑完) | — |
+| **E_M3_seed42** | 启 M3W | §6.2 命令 A |
+| **E_M3W_seed42** | 标记 LOSS_DEAD,启 M1 | §6.2 命令 B |
+| **E_M1_seed42** | 标记 BACKBONE_DEAD,启 M4 | §6.2 命令 C |
+| **E_M4_seed42** | 启 M4W | §6.2 命令 D |
+| **E_M4W_seed42** | **全部失败,§6.4 hard stop** | §6.4 命令 E |
+| 稳定性 / 对比 | **不 KILL**(让 patience 自然停) | — |
+
+### 6.2 命令模板(复制-粘贴执行,不要改参数)
+
+#### 命令 A:M3 KILL → 启 M3W
+
+```bash
+ssh -p 6168 root@20.62.104.255 "
+tmux kill-session -t train_queue 2>/dev/null
+sleep 5
+TS=\$(date +%Y%m%d_%H%M)
+mv ~/cmdrill-yolov12/runs/cmdrill/E_M3_seed42 ~/cmdrill-yolov12/runs/cmdrill/_E_M3_seed42_KILLED_\$TS
+cd ~/cmdrill-yolov12/yolov12_ours
+tmux new -d -s train_queue '
+bash scripts/train_ablation.sh M3W 42 2>&1 | tee -a ~/cmdrill-yolov12/logs/queue.log
+bash scripts/train_ablation.sh M1  42 2>&1 | tee -a ~/cmdrill-yolov12/logs/queue.log
+bash scripts/train_ablation.sh M4  42 2>&1 | tee -a ~/cmdrill-yolov12/logs/queue.log
+'
+sleep 8
+tmux ls
+"
+```
+
+#### 命令 B:M3W KILL → 跳到 M1(标记 LOSS_DEAD)
+
+```bash
+ssh -p 6168 root@20.62.104.255 "
+tmux kill-session -t train_queue 2>/dev/null
+sleep 5
+TS=\$(date +%Y%m%d_%H%M)
+mv ~/cmdrill-yolov12/runs/cmdrill/E_M3W_seed42 ~/cmdrill-yolov12/runs/cmdrill/_E_M3W_seed42_KILLED_\$TS
+echo 'LOSS_DEAD' > ~/cmdrill-yolov12/.failed_components
+cd ~/cmdrill-yolov12/yolov12_ours
+tmux new -d -s train_queue '
+bash scripts/train_ablation.sh M1 42 2>&1 | tee -a ~/cmdrill-yolov12/logs/queue.log
+bash scripts/train_ablation.sh M4 42 2>&1 | tee -a ~/cmdrill-yolov12/logs/queue.log
+'
+sleep 8
+tmux ls
+"
+```
+
+#### 命令 C:M1 KILL → 跳到 M4(标记 BACKBONE_DEAD)
+
+```bash
+ssh -p 6168 root@20.62.104.255 "
+tmux kill-session -t train_queue 2>/dev/null
+sleep 5
+TS=\$(date +%Y%m%d_%H%M)
+mv ~/cmdrill-yolov12/runs/cmdrill/E_M1_seed42 ~/cmdrill-yolov12/runs/cmdrill/_E_M1_seed42_KILLED_\$TS
+echo 'BACKBONE_DEAD' >> ~/cmdrill-yolov12/.failed_components
+cd ~/cmdrill-yolov12/yolov12_ours
+tmux new -d -s train_queue '
+bash scripts/train_ablation.sh M4 42 2>&1 | tee -a ~/cmdrill-yolov12/logs/queue.log
+'
+sleep 8
+tmux ls
+"
+```
+
+#### 命令 D:M4 KILL → 启 M4W
+
+```bash
+ssh -p 6168 root@20.62.104.255 "
+tmux kill-session -t train_queue 2>/dev/null
+sleep 5
+TS=\$(date +%Y%m%d_%H%M)
+mv ~/cmdrill-yolov12/runs/cmdrill/E_M4_seed42 ~/cmdrill-yolov12/runs/cmdrill/_E_M4_seed42_KILLED_\$TS
+cd ~/cmdrill-yolov12/yolov12_ours
+tmux new -d -s train_queue 'bash scripts/train_ablation.sh M4W 42 2>&1 | tee -a ~/cmdrill-yolov12/logs/queue.log'
+sleep 8
+tmux ls
+"
+```
+
+### 6.3 PASS 后转移(无需 KILL,自然完成)
+
+`train_all_remaining.sh` 已在 ablation 末尾自动调用 `check_improvement.py`,**通过则自动进下一阶段**,代理只需观察。代理**不需要**手动启动下一阶段,除非走 §6.2 的 KILL 路径。
+
+### 6.4 全失败 HARD STOP(§关键!)
+
+**触发条件**(满足任一即触发):
+- E_M4_seed42 KILL 后 E_M4W_seed42 也 KILL → 三个改进均无效
+- M1 KILL 且 M3 也 KILL 且 M3W 也 KILL → loss 改进 + backbone 改进均无效
+
+**动作 — 命令 E:**
+
+```bash
+ssh -p 6168 root@20.62.104.255 "
+tmux kill-session -t train_queue 2>/dev/null
+sleep 5
+echo \"\$(date +'%Y-%m-%d %H:%M:%S') HARD_STOP — all ablations failed, paper innovations confirmed ineffective\" >> ~/cmdrill-yolov12/logs/HARD_STOP.log
+nvidia-smi --query-gpu=memory.used --format=csv,noheader
+"
+```
+
+**报告**(强制完整):
+1. 时间戳
+2. 失败的 ablation 列表 + 各自 best mAP + Δ vs E0
+3. 已经归档的 KILLED dir 路径
+4. **已停止所有训练,GPU 已释放**(贴 `nvidia-smi` 输出确认)
+5. **明确告知用户:三创新点无效,等待新方案,监控代理无权设计**
+
+之后**继续每 30 分钟轮询但只做"GPU 使用监控"(不应该有任何训练在跑)**,如发现 GPU 又被占用(用户可能远程在做新实验),报告并继续观察。
+
+---
+
+## 6A. 监控代理的硬边界(BOUNDARIES — 严禁越界)
+
+监控代理**只允许做**以下事:
+1. 执行 §4 的检查命令
+2. 按 §5 决策树判断
+3. 执行 §6.2 / §6.4 中**完全字面**的命令模板(包括 mv 归档命名)
+4. 执行 §10 的轮询任务
+5. 写报告 / 写日志
+6. 用 `RESUME=yes bash scripts/train_ablation.sh <V> 42` 续训(仅当容器重启等导致中断且本来 ablation 还没结论)
+
+**严禁**:
+- ❌ 修改 `train_ablation.sh` / `train_all_remaining.sh` / 任何 Python 代码
+- ❌ 修改 hyperparameter(lr, batch, epochs, patience, mosaic, etc.)
+- ❌ 创建新 YAML / 新模块 / 新 ablation 变体(M5, M6, M3X, etc.)
+- ❌ 改 fallback 链顺序或决策阈值
+- ❌ 删除任何已完成实验的 run dir(包括 `_KILLED_*` 归档)
+- ❌ 自主"建议"或"实施"新方法(如把 DSConv 移到 P3、用 Slim-Neck、加 EIoU 等)
+- ❌ 在不在表中的状态做"创造性"决策
+
+如出现表内未覆盖的情形(数据集变化、新增 ablation、queue 顺序变更),代理**只报告 + 等待用户介入**。表是封闭的。
+
+---
+
+## 6B. GPU 节省规则
+
+- 一旦触发 §6.4 HARD STOP,**绝不再启动任何训练**(直到用户明确介入)
+- 一旦发现 ablation 在前 60 epoch 同期 Δ < -1.5pp 且 patience(50) 还有 100+ epoch 远,**应触发 KILL**(不要等 patience 自然停)
+- 稳定性 seed (s123) 和对比实验(C1-C4)只在**至少一个 ablation 通过**时才跑;否则跳过(`train_all_remaining.sh` 在 v2 中通过 `set -e + check_improvement.py` 已经自动处理这种情况,代理只需不主动重启 queue)
+- 单实验 patience=50 已经是上界,代理**不要把 patience 调高**让训练跑更久(看 §6A)
+
+---
 
 ### 6.1 切换到 M3W(WIoU)的执行流程
 
@@ -265,7 +425,7 @@ Read CLAUDE.md fully and confirm you understand the monitoring task. Then:
 ### 轮询 prompt(确认初始检查通过后,粘贴 /loop 命令)
 
 ```
-/loop 30m 监控 CMDrill-YOLOv12 训练队列。按 CLAUDE.md §4 执行检查命令,按 §5 决策树判断。无新进展报一句话即可,有 ablation 完成 / 触发 watch / KILL 时按 §7 报告格式。如触发 KILL,按 §6 自动执行 fallback 切换并完整报告。绝不在训练中 rename / 移动 run dir(§8.4)。
+/loop 30m 监控 CMDrill-YOLOv12 训练队列。按 CLAUDE.md §4 执行检查命令,按 §5 决策树判断。无新进展报一句话即可,有 ablation 完成 / 触发 watch / KILL 时按 §7 报告格式。如触发 KILL,按 §6.2 表格中**字面对应**的命令模板执行 fallback 切换(不得改动命令任何部分),并完整报告。绝不在训练中 rename / 移动 run dir(§8.4)。绝不自主设计新 ablation / 改超参 / 改决策阈值(§6A 边界)。如触发 §6.4 HARD STOP 条件,执行命令 E 全停训练,完整报告 §12 信息后等用户介入。
 ```
 
 设好后,Claude Code 每 30 分钟自动触发上述 prompt,你只需偶尔回来看 chat 历史就能看到所有报告和决策。
@@ -288,18 +448,26 @@ Read CLAUDE.md fully and confirm you understand the monitoring task. Then:
 
 ## 12. 课题成功与失败的最终判定
 
-监控代理需要明白:**用户硬约束是"任何 ablation 不得低于 baseline"**。理论上至少需要一个 ablation 比 E0 高才算成功。
+**用户硬约束**:任何 ablation 不得低于 baseline(±0.5pp 容差)。理论上至少需要一个 ablation 比 E0 高才算成功。
 
-如果 M3 / M3W / M1 / M4 / M4W 全部 < baseline:
-1. 报"全部 ablation 注定不达标"
-2. 停止任何还在跑的训练
-3. 等待用户介入,提示考虑:
-   - DSConv 移到 P3 stage(需新写 DS_C3k2 类)
-   - 换 Slim-Neck (GSConv) 替代 BiFPN+P2
-   - 切到 Focal-EIoU 等其他 loss
-   - 换 paper narrative(轻量化部署而非超 SOTA)
+### 终态判定矩阵
 
-监控代理**不要**自主跳到这些方案(需要新代码,超出当前 fork 提供的能力);只报告 + 等待。
+| M3 / M3W | M1 | M4 / M4W | 终态 | 监控代理动作 |
+|:---:|:---:|:---:|:---|:---|
+| 任一 PASS | 任一 PASS | 任一 PASS | ✅ FULL SUCCESS | 进稳定性 + 对比阶段 |
+| 任一 PASS | PASS | M4 失败 + M4W 失败 | ⚠️ PARTIAL | 触发 HARD STOP §6.4,M4 失败说明组合干扰,等用户介入 |
+| 任一 PASS | KILL | 任一 PASS | ⚠️ PARTIAL | 进稳定性 + 对比,但 M1 失败需在论文里说明 |
+| 全 KILL | KILL | 全 KILL | ❌ HARD STOP | 全停,**绝不**自主提下一步方案 |
+
+### 监控代理在 HARD STOP 后**只做以下事**
+
+1. 报告"三创新点经验证无效"
+2. 列出每个 ablation 的最终 best mAP + Δ vs E0
+3. 列出归档的 KILLED dir 路径(供用户事后分析)
+4. 确认 GPU 已释放
+5. **等待用户介入**
+
+**严禁**(再次重复):监控代理不得提出"建议尝试 DSConv 移 P3 / Slim-Neck / Focal-EIoU / 换 narrative"等新方案。**这超出代理权限**。所有"重新设计"的事都由用户在新对话里和开发会话讨论。
 
 ---
 
