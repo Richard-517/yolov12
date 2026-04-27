@@ -33,17 +33,18 @@ git pull origin cmdrill-dev 2>&1 | tail -5
 chmod +x scripts/*.sh
 
 # Ablations (yolov12_ours env) — each gated by a *best-epoch* regression check against E0.
-# Order rationale (Session 5, post-bug-fix):
-#   1. M2 first  — BiFPN+P2 only, no math-prone module, highest probability of clean win.
-#                  If M2 < baseline, the dataset doesn't reward small-object capacity and
-#                  the rest of the design is at risk; we stop and reconsider.
-#   2. M3 next   — Inner-MPDIoU only (baseline arch). After stride-space fix, this is the
-#                  fastest signal on whether the loss change actually helps.
-#   3. M1        — DS-A2C2f only with the zero-init ds_fuse fix.
-#   4. M4        — full combined method.
-log "E_M2_seed42"          && bash scripts/train_ablation.sh  M2 42  2>&1 | tee "$LOG/E_M2_seed42.log"
-check_regression  "E_M2_seed42"
-
+# Order rationale (Session 5 v2, after first M2 attempt):
+#   M2 SKIPPED — paused at epoch 81, same-epoch lag vs E0 of -0.51pp, and same-epoch lag vs
+#   the broken M1_old of -0.78pp suggests BiFPN+P2 alone doesn't help this dataset (P2 head
+#   gradient dilution to mid/large classes outweighs small-object recall gain). Run dir
+#   E_M2_seed42 is preserved with last.pt at epoch 81; can be resumed later via
+#       RESUME=yes bash scripts/train_ablation.sh M2 42
+#   if needed for the ablation table.
+#
+#   1. M3 first  — Inner-MPDIoU only with stride-space fix; fastest signal on whether the
+#                  Session 5 loss-bug fix actually delivers improvement.
+#   2. M1        — DS-A2C2f only with zero-init ds_fuse fix.
+#   3. M4        — full combined method.
 log "E_M3_seed42"          && bash scripts/train_ablation.sh  M3 42  2>&1 | tee "$LOG/E_M3_seed42.log"
 check_regression  "E_M3_seed42"
 

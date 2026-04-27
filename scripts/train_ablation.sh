@@ -31,9 +31,21 @@ case "${VARIANT}" in
 esac
 
 NAME="E_${VARIANT}_seed${SEED}"
-echo "[${VARIANT}] cfg=${CFG}  iou=${IOU}  ratio=${RATIO}  warmup=${WARMUP}  seed=${SEED}"
+LAST_PT="${PROJECT}/${NAME}/weights/last.pt"
+RESUME=${RESUME:-auto}   # auto | yes | no
 
-python - <<PY
+# Auto-resume: if a partial run exists (last.pt present) and we're not explicitly forced fresh,
+# resume from it. Ultralytics rebuilds optimizer, EMA, LR scheduler, and epoch counter from the
+# checkpoint and re-reads args.yaml, so the run continues bit-identically.
+if [ "${RESUME}" != "no" ] && [ -f "${LAST_PT}" ]; then
+    echo "[${VARIANT}] RESUMING from ${LAST_PT} (delete weights/last.pt or pass RESUME=no for fresh start)"
+    python - <<PY
+from ultralytics import YOLO
+YOLO("${LAST_PT}").train(resume=True)
+PY
+else
+    echo "[${VARIANT}] FRESH start  cfg=${CFG}  iou=${IOU}  ratio=${RATIO}  warmup=${WARMUP}  seed=${SEED}"
+    python - <<PY
 from ultralytics import YOLO
 model = YOLO("${CFG}")
 model.train(
@@ -53,3 +65,4 @@ model.train(
     ciou_warmup_epochs=${WARMUP},
 )
 PY
+fi
