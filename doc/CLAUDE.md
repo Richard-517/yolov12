@@ -425,7 +425,7 @@ Read CLAUDE.md fully and confirm you understand the monitoring task. Then:
 ### 轮询 prompt(确认初始检查通过后,粘贴 /loop 命令)
 
 ```
-/loop 30m 监控 CMDrill-YOLOv12 训练队列。按 CLAUDE.md §4 执行检查命令,按 §5 决策树判断。无新进展报一句话即可,有 ablation 完成 / 触发 watch / KILL 时按 §7 报告格式。如触发 KILL,按 §6.2 表格中**字面对应**的命令模板执行 fallback 切换(不得改动命令任何部分),并完整报告。绝不在训练中 rename / 移动 run dir(§8.4)。绝不自主设计新 ablation / 改超参 / 改决策阈值(§6A 边界)。如触发 §6.4 HARD STOP 条件,执行命令 E 全停训练,完整报告 §12 信息后等用户介入。
+/loop 30m 监控 CMDrill-YOLOv12 训练队列。按 CLAUDE.md §4 执行检查命令,按 §5 决策树判断。每次轮询结束后**必须**按 §13.2 把单行追加到服务器 ~/cmdrill-yolov12/logs/monitor/monitor.log,把完整状态快照 overwrite 到 last_check.txt;触发 KILL/WATCH-warning/HARD_STOP 时还要按 §13.3 把详细事件 append 到 decisions.log。无新进展报一句话即可,有 ablation 完成 / 触发 watch / KILL 时按 §7 报告格式。如触发 KILL,按 §6.2 表格中字面对应的命令模板执行 fallback 切换(不得改动命令任何部分),并完整报告。绝不在训练中 rename / 移动 run dir(§8.4)。绝不自主设计新 ablation / 改超参 / 改决策阈值(§6A 边界)。如触发 §6.4 HARD STOP 条件,执行命令 E 全停训练,完整报告 §12 信息后等用户介入。
 ```
 
 设好后,Claude Code 每 30 分钟自动触发上述 prompt,你只需偶尔回来看 chat 历史就能看到所有报告和决策。
@@ -512,6 +512,101 @@ Read CLAUDE.md fully and confirm you understand the monitoring task. Then:
 ```
 
 行格式:`<timestamp>  active=<run>  e<n>/300  best=<best>  Δsame=<delta>  decision=<word>`
+
+---
+
+## 13. 服务器端日志写入(必须做!跨会话续接)
+
+监控代理**每次轮询都要在服务器上落盘日志**。理由:
+- 开发会话(其他对话/未来 session)能直接 `ssh ... cat ...` 读监控历史,不用查监控 Claude 的 chat 回放
+- 监控 Claude 与开发 Claude 解耦,任何一边崩了/换会话,另一边都还能继续工作
+
+### 13.1 日志路径(三个文件,各司其职)
+
+```
+~/cmdrill-yolov12/logs/monitor/
+├── monitor.log        # 每次轮询 append 一行(纯文本,chronological)
+├── decisions.log      # 仅 KILL / WATCH-warning / HARD_STOP 时 append(重要事件,详细)
+└── last_check.txt     # 每次轮询 overwrite 完整状态快照(供秒读)
+```
+
+服务器已预创建该目录 + 说明文件。代理每次写之前 `mkdir -p` 即可,防御性。
+
+### 13.2 每次轮询的写日志步骤(强制)
+
+在 §4 检查命令读完数据 + §5 决策完成后,**必须**追加以下 SSH 写入:
+
+```bash
+ssh -p 6168 root@20.62.104.255 "mkdir -p ~/cmdrill-yolov12/logs/monitor && \
+cat > ~/cmdrill-yolov12/logs/monitor/last_check.txt <<EOF
+timestamp: \$(date '+%Y-%m-%d %H:%M:%S %Z')
+active_run: <RUN_NAME>
+epochs: <N>/300
+last_epoch_mAP50: <X.XXXX>
+best_mAP50: <X.XXXX>
+delta_best_vs_E0: <±X.XXXX>
+delta_same_epoch: <±X.XXXX>
+decision: <word>   # too_early | watch | ahead | continue | KILL | HARD_STOP
+notes: <one-line context>
+EOF
+echo '\$(date \"+%Y-%m-%d %H:%M:%S\")  active=<RUN_NAME>  e<N>/300  best=<X.XXXX>  Δsame=<±X.XXXX>  decision=<word>' >> ~/cmdrill-yolov12/logs/monitor/monitor.log"
+```
+
+代理把 `<RUN_NAME>`、`<N>`、`<X.XXXX>` 等占位符替换成本次实测值再发出。
+
+### 13.3 重要事件追加 decisions.log(仅 KILL / WATCH / HARD_STOP)
+
+仅在 §5 决策为 `KILL` / `WATCH-warning`(同期 Δ < -0.5pp 但还没到 KILL 阈值)/ `HARD_STOP` 时,**额外** append 多行事件:
+
+```bash
+ssh -p 6168 root@20.62.104.255 "cat >> ~/cmdrill-yolov12/logs/monitor/decisions.log <<EOF
+=== \$(date '+%Y-%m-%d %H:%M:%S %Z') ===
+event: <KILL | WATCH | HARD_STOP>
+active_run: <name>
+epochs_completed: <N>
+best_mAP50: <X.XXXX>
+delta_best_vs_E0: <±X.XXXX>
+delta_same_epoch_avg30: <±X.XXXX>
+trend_30: <±X.XXXX>
+threshold_triggered: <which §5 rule fired>
+fallback_launched: <next run name | NONE for HARD_STOP>
+killed_dir_archived: <path | none>
+notes: <one-line>
+EOF
+"
+```
+
+### 13.4 开发会话(任何后续 Claude session)如何读这些日志
+
+直接 SSH 命令(无需 git pull,无需 chat 历史):
+
+```bash
+# 秒级了解最新状态
+ssh -p 6168 root@20.62.104.255 cat ~/cmdrill-yolov12/logs/monitor/last_check.txt
+
+# 最近 50 次轮询(过去 ~25 小时)
+ssh -p 6168 root@20.62.104.255 tail -50 ~/cmdrill-yolov12/logs/monitor/monitor.log
+
+# 所有重要事件(KILL/HARD_STOP/WATCH)
+ssh -p 6168 root@20.62.104.255 cat ~/cmdrill-yolov12/logs/monitor/decisions.log
+
+# 三个一起,一次拉
+ssh -p 6168 root@20.62.104.255 "
+echo '=== last_check ==='; cat ~/cmdrill-yolov12/logs/monitor/last_check.txt 2>/dev/null
+echo '=== last 30 polls ==='; tail -30 ~/cmdrill-yolov12/logs/monitor/monitor.log 2>/dev/null
+echo '=== decisions ==='; tail -50 ~/cmdrill-yolov12/logs/monitor/decisions.log 2>/dev/null
+"
+```
+
+### 13.5 日志大小管理
+
+每次轮询 1 行 monitor.log 单行 ~120 字符,30 min 一次,7 天 = ~336 行 = ~40KB。无需 rotation。
+
+如 last_check.txt 看着累积过大(误将旧内容拼接而非覆盖),代理用 `>` 而非 `>>` 重写。
+
+### 13.6 失败场景
+
+如 SSH 写日志失败(网络抖动等),代理**继续完成本次决策 + 报告 chat**,不重试无限循环。下次轮询会写入"上次写日志失败,本次正常"。
 
 ---
 
