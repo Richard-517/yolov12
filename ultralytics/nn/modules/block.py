@@ -1372,9 +1372,17 @@ class A2C2f(nn.Module):
 class DS_A2C2f(nn.Module):
     """DSConv-augmented Area Attention C2f (CMDrill-YOLOv12, Improvement 1).
 
-    Runs the original A2C2f main path and a parallel dual-direction DSConv branch
+    Runs the original A2C2f main path AND a parallel dual-direction DSConv branch
     (horizontal + vertical snake). The branch output is fused back via a learnable
-    scalar ds_weight. Output shape is identical to A2C2f(c1, c2).
+    scalar `ds_weight`. Output shape is identical to A2C2f(c1, c2).
+
+    Init invariant (post-fix, Session 5): at init, the DS branch contributes ZERO
+    to the output (`ds_fuse` weights are zero-initialized), so DS_A2C2f at step 0
+    is bit-identical to A2C2f. Gradient still flows back into ds_fuse / ds_h / ds_v
+    via dL/dy_ds = ds_weight · dL/dout, so the branch starts learning from step 1.
+    Without this trick, the random-init DS branch contaminates the main path at
+    init (~30% noise) and can suppress baseline-level learning — this was the root
+    cause of M1's −0.6pp regression on the first DsDPM66 run.
     """
 
     def __init__(self, c1, c2, n=1, a2=True, area=1, residual=False,
@@ -1392,7 +1400,11 @@ class DS_A2C2f(nn.Module):
         self.ds_v = DSConv(in_channels=c1, out_channels=c2,
                            kernel_size=ds_kernel, extend_scope=1.0,
                            morph=1, if_offset=True)
+
+        # ds_fuse weights are zero-initialized so y_ds == 0 at step 0 (no init contamination).
+        # Gradient still reaches these weights via downstream dL/dy_ds, so they start learning.
         self.ds_fuse = nn.Conv2d(2 * c2, c2, kernel_size=1, bias=False)
+        nn.init.zeros_(self.ds_fuse.weight)
         self.ds_bn = nn.BatchNorm2d(c2)
         self.ds_act = nn.SiLU()
 
@@ -1408,17 +1420,19 @@ class DS_A2C2f(nn.Module):
 class BiFPN_Add2(nn.Module):
     """Weighted bidirectional feature fusion for 2 inputs (CMDrill-YOLOv12, M2).
 
-    Each input is projected to c2 via a 1x1 Conv, then summed with learnable
-    weights normalized via ReLU. Handles mixed input channel counts.
+    Each input goes through a 1x1 conv-only projection (no BN/SiLU here, to avoid
+    double activation: the projection's BN+SiLU is dropped and exactly one BN+SiLU
+    is applied AFTER the weighted sum, matching EfficientDet's BiFPN flow).
     """
 
     def __init__(self, c1_list, c2):
         super().__init__()
         if not isinstance(c1_list, (list, tuple)) or len(c1_list) != 2:
             raise ValueError(f"BiFPN_Add2 expects c1_list of length 2, got {c1_list}")
-        self.proj = nn.ModuleList([Conv(c, c2, k=1, s=1, p=0) for c in c1_list])
+        self.proj = nn.ModuleList([nn.Conv2d(c, c2, kernel_size=1, bias=False) for c in c1_list])
         self.w = nn.Parameter(torch.ones(2, dtype=torch.float32))
         self.eps = 1e-4
+        self.bn = nn.BatchNorm2d(c2)
         self.act = nn.SiLU()
 
     def forward(self, x):
@@ -1426,7 +1440,7 @@ class BiFPN_Add2(nn.Module):
         w = w / (w.sum() + self.eps)
         p0 = self.proj[0](x[0])
         p1 = self.proj[1](x[1])
-        return self.act(w[0] * p0 + w[1] * p1)
+        return self.act(self.bn(w[0] * p0 + w[1] * p1))
 
 
 class BiFPN_Add3(nn.Module):
@@ -1436,9 +1450,10 @@ class BiFPN_Add3(nn.Module):
         super().__init__()
         if not isinstance(c1_list, (list, tuple)) or len(c1_list) != 3:
             raise ValueError(f"BiFPN_Add3 expects c1_list of length 3, got {c1_list}")
-        self.proj = nn.ModuleList([Conv(c, c2, k=1, s=1, p=0) for c in c1_list])
+        self.proj = nn.ModuleList([nn.Conv2d(c, c2, kernel_size=1, bias=False) for c in c1_list])
         self.w = nn.Parameter(torch.ones(3, dtype=torch.float32))
         self.eps = 1e-4
+        self.bn = nn.BatchNorm2d(c2)
         self.act = nn.SiLU()
 
     def forward(self, x):
@@ -1447,4 +1462,4 @@ class BiFPN_Add3(nn.Module):
         p0 = self.proj[0](x[0])
         p1 = self.proj[1](x[1])
         p2 = self.proj[2](x[2])
-        return self.act(w[0] * p0 + w[1] * p1 + w[2] * p2)
+        return self.act(self.bn(w[0] * p0 + w[1] * p1 + w[2] * p2))

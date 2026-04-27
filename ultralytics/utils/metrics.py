@@ -134,6 +134,63 @@ def bbox_iou(box1, box2, xywh=True, GIoU=False, DIoU=False, CIoU=False, eps=1e-7
     return iou  # IoU
 
 
+def wise_iou_v3(box1, box2, xywh=False, running_mean=None, alpha=1.9, delta=3.0, eps=1e-7):
+    """Wise-IoU v3 loss (Tong et al. 2023, arXiv:2301.10051) — CMDrill-YOLOv12 backup IoU.
+
+    Returns the per-bbox L_WIoUv3 = r * L_WIoUv1, where:
+      L_IoU      = 1 - IoU
+      R_WIoUv1   = exp(d² / c²)         (center-distance attention)
+      L_WIoUv1   = R_WIoUv1 · L_IoU
+      β          = L_IoU / L̄_IoU         (relative outlier degree, detached)
+      r          = β / (δ · α^(β-δ))    (non-monotonic focusing, detached)
+
+    `running_mean` is an EMA buffer of L_IoU (managed by the caller); pass None to
+    skip dynamic focusing (degenerates to WIoU-v1, still usable for warmup).
+
+    Bboxes must be in pixel space — same constraint as MPDIoU.
+    """
+    if xywh:
+        (x1, y1, w1, h1), (x2, y2, w2, h2) = box1.chunk(4, -1), box2.chunk(4, -1)
+        b1_x1, b1_x2, b1_y1, b1_y2 = x1 - w1 / 2, x1 + w1 / 2, y1 - h1 / 2, y1 + h1 / 2
+        b2_x1, b2_x2, b2_y1, b2_y2 = x2 - w2 / 2, x2 + w2 / 2, y2 - h2 / 2, y2 + h2 / 2
+    else:
+        b1_x1, b1_y1, b1_x2, b1_y2 = box1.chunk(4, -1)
+        b2_x1, b2_y1, b2_x2, b2_y2 = box2.chunk(4, -1)
+
+    # IoU
+    inter = (b1_x2.minimum(b2_x2) - b1_x1.maximum(b2_x1)).clamp_(0) * \
+            (b1_y2.minimum(b2_y2) - b1_y1.maximum(b2_y1)).clamp_(0)
+    w1 = (b1_x2 - b1_x1).clamp_(min=0)
+    h1 = (b1_y2 - b1_y1).clamp_(min=0)
+    w2 = (b2_x2 - b2_x1).clamp_(min=0)
+    h2 = (b2_y2 - b2_y1).clamp_(min=0)
+    union = w1 * h1 + w2 * h2 - inter + eps
+    iou = inter / union
+
+    # Center-distance attention; c² = enclosing box diagonal squared.
+    cx1, cy1 = (b1_x1 + b1_x2) / 2, (b1_y1 + b1_y2) / 2
+    cx2, cy2 = (b2_x1 + b2_x2) / 2, (b2_y1 + b2_y2) / 2
+    d2 = (cx1 - cx2).pow(2) + (cy1 - cy2).pow(2)
+    enc_w = b1_x2.maximum(b2_x2) - b1_x1.minimum(b2_x1)
+    enc_h = b1_y2.maximum(b2_y2) - b1_y1.minimum(b2_y1)
+    c2 = enc_w.pow(2) + enc_h.pow(2) + eps
+
+    L_iou = 1 - iou
+    # Detach R from anchor-pixel coords as Tong et al. recommend (only IoU stays differentiable).
+    R_wiou = torch.exp((d2 / c2).detach())
+    L_wiou_v1 = R_wiou * L_iou
+
+    if running_mean is None:
+        return L_wiou_v1.squeeze(-1)
+
+    # v3 non-monotonic focusing (detached, no gradient).
+    with torch.no_grad():
+        mean = running_mean.clamp(min=eps)
+        beta = L_iou.detach() / mean
+        r = beta / (delta * (alpha ** (beta - delta)) + eps)
+    return (r * L_wiou_v1).squeeze(-1)
+
+
 def inner_mpdiou(box1, box2, xywh=False, ratio=0.7, img_wh=(640, 640), eps=1e-7):
     """CMDrill-YOLOv12 Inner-MPDIoU (Improvement 3).
 

@@ -9,7 +9,7 @@ from ultralytics.utils.ops import crop_mask, xywh2xyxy, xyxy2xywh
 from ultralytics.utils.tal import RotatedTaskAlignedAssigner, TaskAlignedAssigner, dist2bbox, dist2rbox, make_anchors
 from ultralytics.utils.torch_utils import autocast
 
-from .metrics import bbox_iou, inner_mpdiou, probiou
+from .metrics import bbox_iou, inner_mpdiou, probiou, wise_iou_v3
 from .tal import bbox2dist
 
 
@@ -91,45 +91,80 @@ class DFLoss(nn.Module):
 class BboxLoss(nn.Module):
     """Criterion class for computing training losses during training.
 
-    Supports the CMDrill-YOLOv12 Inner-MPDIoU loss with CIoU warmup:
-      - iou_type='ciou' (default): original CIoU behavior
-      - iou_type='inner_mpdiou': Inner-MPDIoU with `inner_ratio` scaling
-      - ciou_warmup_epochs: force CIoU for the first N epochs regardless of iou_type
-        (Inner-MPDIoU's point-distance term can be unstable early in training)
+    CMDrill-YOLOv12 IoU variants (selected by `iou_type`):
+      - 'ciou'         (default): original CIoU
+      - 'inner_mpdiou': Inner-IoU + MPDIoU corner-distance penalty (paper M3)
+      - 'wiou'         : Wise-IoU v3 with non-monotonic focusing (Tong 2023, arXiv:2301.10051) —
+                         backup IoU; gates loss by per-anchor outlier degree, helps occluded /
+                         partially-overlapping bboxes which CIoU cannot down-weight.
+
+    `ciou_warmup_epochs` forces CIoU for the first N epochs even when a non-CIoU
+    type is selected. Inner-MPDIoU's normalized point-distance can otherwise be
+    unstable in the warmup stage where bboxes are still wildly off.
+
+    Important plumbing note: pred_bboxes / target_bboxes arrive in **per-anchor
+    stride space** (units = grid cells of each anchor's level). For Inner-MPDIoU
+    we need *pixel space* so the d² / image-diagonal² ratio is dimensionally
+    correct — so the caller must thread `stride_tensor[fg_mask]` through.
     """
 
     def __init__(self, reg_max=16, iou_type="ciou", inner_ratio=0.7, ciou_warmup_epochs=0):
-        """Initialize the BboxLoss module."""
         super().__init__()
         self.dfl_loss = DFLoss(reg_max) if reg_max > 1 else None
         self.iou_type = iou_type
         self.inner_ratio = inner_ratio
         self.ciou_warmup_epochs = ciou_warmup_epochs
-        # Updated by the `on_train_epoch_start` callback (see utils/callbacks/base.py).
-        # Default 0 keeps Inner-MPDIoU disabled during warmup; a callback sets this at runtime.
+        # Updated each epoch by `on_train_epoch_start` callback.
         self.current_epoch = 0
+        # Running mean of L_IoU for WIoU v3 dynamic focusing (per-process).
+        self.register_buffer("_wiou_loss_mean", torch.tensor(1.0))
 
     def forward(
         self, pred_dist, pred_bboxes, anchor_points,
         target_bboxes, target_scores, target_scores_sum, fg_mask,
-        img_wh=(640, 640),
+        stride_tensor=None, img_wh=(640, 640),
     ):
         """IoU loss."""
         weight = target_scores.sum(-1)[fg_mask].unsqueeze(-1)
         pb = pred_bboxes[fg_mask]
         tb = target_bboxes[fg_mask]
 
-        use_inner = (self.iou_type == "inner_mpdiou"
-                     and self.current_epoch >= self.ciou_warmup_epochs)
-        if use_inner:
-            iou_value = inner_mpdiou(pb, tb, xywh=False,
+        # CIoU during warmup; otherwise the configured iou_type.
+        active_type = "ciou" if self.current_epoch < self.ciou_warmup_epochs else self.iou_type
+
+        # stride_tensor is (num_anchors, 1), but fg_mask is (B, num_anchors).
+        # We need per-positive stride; broadcast then mask.
+        if stride_tensor is not None and active_type in ("inner_mpdiou", "wiou"):
+            # expand → (B, num_anchors, 1), no extra memory; then [fg_mask] → (n_fg, 1)
+            s = stride_tensor.unsqueeze(0).expand(fg_mask.shape[0], -1, -1)[fg_mask]
+        else:
+            s = None
+
+        if active_type == "inner_mpdiou":
+            if s is None:
+                raise ValueError("Inner-MPDIoU requires stride_tensor.")
+            # Convert stride-space → pixel-space; fp32 cast prevents fp16 overflow on d² (640²=409600 > fp16_max).
+            pb_px = (pb * s).float()
+            tb_px = (tb * s).float()
+            iou_value = inner_mpdiou(pb_px, tb_px, xywh=False,
                                      ratio=self.inner_ratio, img_wh=img_wh)
             loss_iou = ((1.0 - iou_value) * weight.squeeze(-1)).sum() / target_scores_sum
-        else:
+        elif active_type == "wiou":
+            if s is None:
+                raise ValueError("WIoU requires stride_tensor.")
+            pb_px = (pb * s).float()
+            tb_px = (tb * s).float()
+            wiou_loss = wise_iou_v3(pb_px, tb_px, running_mean=self._wiou_loss_mean)
+            # Update running mean (EMA) of L_IoU; only during training to avoid val poisoning.
+            if self.training:
+                with torch.no_grad():
+                    self._wiou_loss_mean.mul_(0.99).add_(wiou_loss.detach().mean(), alpha=0.01)
+            loss_iou = (wiou_loss * weight.squeeze(-1)).sum() / target_scores_sum
+        else:  # 'ciou'
             iou = bbox_iou(pb, tb, xywh=False, CIoU=True)
             loss_iou = ((1.0 - iou) * weight).sum() / target_scores_sum
 
-        # DFL loss
+        # DFL loss (unchanged)
         if self.dfl_loss:
             target_ltrb = bbox2dist(anchor_points, target_bboxes, self.dfl_loss.reg_max - 1)
             loss_dfl = self.dfl_loss(pred_dist[fg_mask].view(-1, self.dfl_loss.reg_max), target_ltrb[fg_mask]) * weight
@@ -286,6 +321,7 @@ class v8DetectionLoss:
             target_bboxes /= stride_tensor
             loss[0], loss[2] = self.bbox_loss(
                 pred_distri, pred_bboxes, anchor_points, target_bboxes, target_scores, target_scores_sum, fg_mask,
+                stride_tensor=stride_tensor,
                 img_wh=(float(imgsz[1].item()), float(imgsz[0].item())),  # (W, H)
             )
 

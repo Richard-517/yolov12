@@ -19,11 +19,15 @@ DATA=${DATA:-"../datasets/dsdpm66.yaml"}
 PROJECT=${PROJECT:-"../runs/cmdrill"}
 
 case "${VARIANT}" in
-    M1) CFG="configs/yolov12s_M1_dsa2c2f.yaml"; IOU="ciou"; RATIO=0.7; WARMUP=0 ;;
-    M2) CFG="configs/yolov12s_M2_bifpn.yaml";   IOU="ciou"; RATIO=0.7; WARMUP=0 ;;
-    M3) CFG="yolov12s.yaml";                    IOU="inner_mpdiou"; RATIO=0.7; WARMUP=10 ;;
-    M4) CFG="configs/yolov12s_M4_ours.yaml";    IOU="inner_mpdiou"; RATIO=0.7; WARMUP=10 ;;
-    *)  echo "unknown variant: ${VARIANT}"; exit 1 ;;
+    M1)  CFG="configs/yolov12s_M1_dsa2c2f.yaml"; IOU="ciou";          RATIO=0.7; WARMUP=0 ;;
+    M2)  CFG="configs/yolov12s_M2_bifpn.yaml";   IOU="ciou";          RATIO=0.7; WARMUP=0 ;;
+    M3)  CFG="yolov12s.yaml";                    IOU="inner_mpdiou";  RATIO=0.7; WARMUP=10 ;;
+    M4)  CFG="configs/yolov12s_M4_ours.yaml";    IOU="inner_mpdiou";  RATIO=0.7; WARMUP=10 ;;
+    # WIoU v3 backup variants (CMDrill-YOLOv12 Session 5).
+    # If M3/M4 with Inner-MPDIoU don't improve, swap iou_type='wiou' (same arch).
+    M3W) CFG="yolov12s.yaml";                    IOU="wiou";          RATIO=0.7; WARMUP=0 ;;
+    M4W) CFG="configs/yolov12s_M4_ours.yaml";    IOU="wiou";          RATIO=0.7; WARMUP=0 ;;
+    *)   echo "unknown variant: ${VARIANT}"; exit 1 ;;
 esac
 
 NAME="E_${VARIANT}_seed${SEED}"
