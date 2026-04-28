@@ -32,13 +32,15 @@ esac
 
 NAME="E_${VARIANT}_seed${SEED}"
 LAST_PT="${PROJECT}/${NAME}/weights/last.pt"
-RESUME=${RESUME:-auto}   # auto | yes | no
+RESUME=${RESUME:-no}   # yes | no   (default: no — fresh start unless explicitly resumed)
 
-# Auto-resume: if a partial run exists (last.pt present) and we're not explicitly forced fresh,
-# resume from it. Ultralytics rebuilds optimizer, EMA, LR scheduler, and epoch counter from the
-# checkpoint and re-reads args.yaml, so the run continues bit-identically.
-if [ "${RESUME}" != "no" ] && [ -f "${LAST_PT}" ]; then
-    echo "[${VARIANT}] RESUMING from ${LAST_PT} (delete weights/last.pt or pass RESUME=no for fresh start)"
+# Resume only when RESUME=yes is explicitly set AND last.pt exists.
+# History note: previously default was "auto" (resume if last.pt exists), but this caused
+# M1 to silently continue from Session 4's pre-fix weights (random-init bug DS-A2C2f) instead
+# of fresh-training the Session 5 zero-init fix. Default-no protects validation of fixes.
+# Caller asks for resume explicitly:  RESUME=yes bash scripts/train_ablation.sh M2 42
+if [ "${RESUME}" = "yes" ] && [ -f "${LAST_PT}" ]; then
+    echo "[${VARIANT}] RESUMING (RESUME=yes) from ${LAST_PT}"
     python - <<PY
 from ultralytics import YOLO
 YOLO("${LAST_PT}").train(resume=True)
