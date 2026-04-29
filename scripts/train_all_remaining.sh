@@ -33,21 +33,16 @@ git pull origin cmdrill-dev 2>&1 | tail -5
 chmod +x scripts/*.sh
 
 # Ablations (yolov12_ours env) — each gated by a *best-epoch* regression check against E0.
-# Order rationale (Session 5 v2, after first M2 attempt):
-#   M2 SKIPPED — paused at epoch 81, same-epoch lag vs E0 of -0.51pp, and same-epoch lag vs
-#   the broken M1_old of -0.78pp suggests BiFPN+P2 alone doesn't help this dataset (P2 head
-#   gradient dilution to mid/large classes outweighs small-object recall gain). Run dir
-#   E_M2_seed42 is preserved with last.pt at epoch 81; can be resumed later via
-#       RESUME=yes bash scripts/train_ablation.sh M2 42
-#   if needed for the ablation table.
+# Order rationale (Session 5 v3, after M3 PASSED + M1 contamination kill):
+#   M2 SKIPPED — paused at e82, BiFPN+P2 alone underperformed; preserved for optional resume
+#                via   RESUME=yes bash scripts/train_ablation.sh M2 42
+#   M3 SKIPPED — already PASSED on Session 5 first run: best=0.6560 @ e228 (Δ=+0.0008 vs
+#                E0=0.6552), patience-stopped e278. E_M3_seed42 dir kept.
 #
-#   1. M3 first  — Inner-MPDIoU only with stride-space fix; fastest signal on whether the
-#                  Session 5 loss-bug fix actually delivers improvement.
-#   2. M1        — DS-A2C2f only with zero-init ds_fuse fix.
-#   3. M4        — full combined method.
-log "E_M3_seed42"          && bash scripts/train_ablation.sh  M3 42  2>&1 | tee "$LOG/E_M3_seed42.log"
-check_regression  "E_M3_seed42"
-
+#   1. M1 first  — DS-A2C2f only with zero-init ds_fuse fix. Fresh start (default RESUME=no).
+#                  Old E_M1_seed42 archived as _E_M1_seed42_KILLED_*_pre_session5_resumed.
+#   2. M4        — full combined method (M1 fixes + M2 BiFPN+P2 + M3 Inner-MPDIoU).
+#                  Old E_M4_seed42 archived before resuming this queue.
 log "E_M1_seed42"          && bash scripts/train_ablation.sh  M1 42  2>&1 | tee "$LOG/E_M1_seed42.log"
 check_regression  "E_M1_seed42"
 
