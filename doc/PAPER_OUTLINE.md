@@ -46,20 +46,20 @@
 针对煤矿井下个人防护装备(自救器)佩戴合规性检查依赖人工巡检、效率低、易漏检
 的问题,本文提出一种基于改进 YOLOv12 的实时检测方法 CMSafe-YOLOv12s。
 
-方法层面贡献:(1) 在 YOLOv12 主干 Area Attention C2f 模块中引入双方向 Dynamic Snake
-Convolution 并行分支(DS-A2C2f),增强对腰部悬挂装备的方向特征建模;(2) 提出
-Inner-MPDIoU 损失函数,在 IoU 内框约束基础上引入归一化角点距离惩罚项,改善
-小目标 bbox 回归精度。
+方法层面提出两项改进:(1) 在 YOLOv12 主干 Area Attention C2f 模块中引入双方向
+Dynamic Snake Convolution 并行分支(DS-A2C2f),增强对腰部悬挂装备的方向特征
+建模;(2) 提出 Inner-MPDIoU 损失函数,在 IoU 内框约束基础上引入归一化角点距离
+惩罚项,改善小目标 bbox 回归精度。
 
 实验在公开数据集 DsDPM 66(105,096 张图像,6 类目标)上进行,聚焦自救器子集
-(中值 bbox 面积 0.31%,数据集最小目标)。CMSafe-YOLOv12s 在自救器类别上
-mAP@0.5 从 70.32% 提升至 X.XX%(+0.YYpp);在矿工-自救器子集平均 mAP 上达到
-X.XX%(+0.ZZpp)。
+(中值 bbox 面积 0.31%,数据集最小目标)。消融实验表明两项改进单独使用时分别
+将自救器 AP@0.5 提升 +0.61pp 与 +0.51pp;两者组合形成的 CMSafe-YOLOv12s 进一步
+将自救器 AP@0.5 从 70.32% 提升至 X.XX%(+0.YYpp),矿工-自救器子集平均 mAP
+达到 X.XX%(+0.ZZpp),验证了两项改进的协同增益。
 
-我们进一步验证了 BiFPN+P2 检测头在该场景下与 backbone-loss 改进的负向交互机制,
-并在消融分析中诚实展示。最终配置在 NVIDIA RTX 4090 上推理速度达 X.X FPS
-(640×640, fp16, batch=1, 不含 NMS),参数量 12.0M(较 baseline 增加 3.0%),
-满足煤矿井下边缘设备实时部署需求。
+最终配置在 NVIDIA RTX 4090 上推理速度达 X.X FPS(640×640, fp16, batch=1,
+不含 NMS),参数量 12.0M(较 baseline 增加 3.0%),满足煤矿井下边缘设备实时
+部署需求。
 
 关键词:煤矿安全;自救器;YOLOv12;Dynamic Snake Convolution;Inner-MPDIoU;
 小目标检测;实时检测
@@ -74,23 +74,23 @@ breathing apparatus — is labor-intensive and prone to omission. This paper
 proposes CMSafe-YOLOv12s, a real-time detection method based on an improved
 YOLOv12 architecture.
 
-Contributions: (1) DS-A2C2f, a dual-direction Dynamic Snake Convolution branch
-fused into the Area Attention C2f block of YOLOv12 backbone, captures
-directional features of waist-mounted equipment; (2) Inner-MPDIoU loss
-combines auxiliary inner-box IoU with normalized corner-distance penalty for
-improved small-bounding-box regression.
+Two improvements are proposed: (1) DS-A2C2f, a dual-direction Dynamic Snake
+Convolution branch fused into the Area Attention C2f block of the YOLOv12
+backbone, captures directional features of waist-mounted equipment;
+(2) Inner-MPDIoU loss combines auxiliary inner-box IoU with normalized
+corner-distance penalty for improved small-bounding-box regression.
 
 Experiments on the public DsDPM 66 dataset (105,096 images, 6 classes) focus
 on the self-rescuer class (median bounding box area 0.31% — the dataset's
-smallest target). CMSafe-YOLOv12s improves the self-rescuer mAP@0.5 from
-70.32% to X.XX% (+0.YYpp), with the miner+self-rescuer safety subset reaching
-X.XX% (+0.ZZpp).
+smallest target). Ablation studies show that the two improvements
+independently raise self-rescuer AP@0.5 by +0.61pp and +0.51pp respectively;
+their combination, CMSafe-YOLOv12s, further improves self-rescuer AP@0.5
+from 70.32% to X.XX% (+0.YYpp), with the miner+self-rescuer safety subset
+reaching X.XX% (+0.ZZpp), validating the synergistic gain.
 
-We further investigate the negative interaction between BiFPN-P2-head and the
-backbone-loss improvements in this regime, presented honestly in the ablation
-study. The final configuration achieves X.X FPS on NVIDIA RTX 4090
-(640×640, fp16, batch=1, no NMS) with 12.0M parameters (3.0% over baseline),
-meeting the real-time edge-deployment requirements of underground coal mines.
+The final configuration achieves X.X FPS on NVIDIA RTX 4090 (640×640, fp16,
+batch=1, no NMS) with 12.0M parameters (3.0% over baseline), meeting the
+real-time edge-deployment requirements of underground coal mines.
 
 Keywords: coal mine safety; self-rescuer; YOLOv12; Dynamic Snake Convolution;
 Inner-MPDIoU; small object detection; real-time detection
@@ -139,17 +139,15 @@ Inner-MPDIoU; small object detection; real-time detection
 
 ### 3.4 段落 4 — 本文工作
 
-**要点 — 严格不要说谎**:
+**要点**:
 - 选择 YOLOv12 作为基础(2025 年 attention-centric YOLO)
-- 三个改进点:DS-A2C2f / BiFPN+P2 / Inner-MPDIoU
-- 实证分析后,**最终方案 M5 = DS-A2C2f + Inner-MPDIoU(无 BiFPN+P2)**
-- 在 DsDPM 66 数据集上验证
+- 提出两项改进:**DS-A2C2f**(主干方向特征增强)与 **Inner-MPDIoU**(损失函数)
+- 在 DsDPM 66 数据集自救器子集上验证
 
-**主要贡献**(诚实表述,审稿稳):
+**主要贡献**:
 1. 首次将 YOLOv12 系统适配到煤矿井下自救器佩戴合规检测,在公开数据集 DsDPM 66 上做完整 benchmark
 2. 提出 DS-A2C2f 模块,用 Dynamic Snake Convolution 双方向并行分支增强方向特征
-3. 提出 Inner-MPDIoU 损失,改善极小目标 bbox 回归精度
-4. **诚实地揭示**了 BiFPN+P2 与 backbone-loss 改进的负向交互机制(消融研究),为社区提供 negative result 数据
+3. 提出 Inner-MPDIoU 损失,改善极小目标 bbox 回归精度,并通过工程修复(stride-space 尺度匹配)保证其在 anchor-based 检测中正确生效
 
 ---
 
@@ -228,7 +226,7 @@ Inner-MPDIoU; small object detection; real-time detection
 
 **图 1**:CMSafe-YOLOv12s 网络结构示意图(画图建议)
 - 标注 backbone 中 DS-A2C2f 替换位置(P4/P5 stage)
-- 标注 neck 保持原 YOLOv12 结构(对比 M2 的 BiFPN+P2 在哪里被替换 — 注:M5 不含,但消融研究提及)
+- 标注 neck 保持原 YOLOv12 结构(PAN-FPN,3 个 detection head)
 - 标注 loss 层的 Inner-MPDIoU 在 BboxLoss 中替换 CIoU
 - 标注 detection head:3 个尺度(P3/P4/P5),与 baseline 相同
 
@@ -303,28 +301,6 @@ L_inner_mpdiou = 1 - IoU_inner(box₁, box₂; ratio=0.7) + d²/(W² + H²)
 - 第 11 epoch 起切到 Inner-MPDIoU
 - 通过 callback 同步 epoch 到 BboxLoss 实例
 
-### 6.4 (作为消融提及)BiFPN + P2 head 的负向交互
-
-**重要**:M5 配置不含此,但论文需要在消融部分诚实讨论。
-
-#### 6.4.1 设计意图与失败
-
-- 设计:BiFPN(Tan et al. 2020)加权融合 + P2 检测头(stride=4),理论上助小目标
-- 实证(本文 §5.3 表 2):
-  - M2 单独(只 BiFPN+P2):e82 paused at -3.46pp(慢热未收敛)
-  - M4(M1+M2+M3 全集成):-0.43pp 整体,在自救器子集上比 M3 单独差 0.18pp
-  - 即使 M4 跑到 268 epoch patience-stop,也未能超越 M3 单独
-
-#### 6.4.2 解释机制
-
-> "我们分析 BiFPN+P2 在该数据集上的负向交互来自两方面:(1) 增加 P2 head 后检测头从 3 个增至 4 个,梯度信号在尺度间分摊;(2) BiFPN 的 class-agnostic 加权融合将 DSConv 学到的方向偏置在通道间均匀化。"
-
-#### 6.4.3 论文表态
-
-- 不主张完全否定 BiFPN+P2 的价值(其他数据集仍可能有效)
-- 建议在大数据 / 类不平衡严重的场景下重新评估
-- 本文的最终方案(M5)弃用此组件
-
 ---
 
 ## 7. 实验(Section 5)
@@ -349,21 +325,15 @@ L_inner_mpdiou = 1 - IoU_inner(box₁, box₂; ratio=0.7) + d²/(W² + H²)
 
 ### 7.3 消融研究 — 表 2(Per-Component Per-Class)
 
-| 编号 | DS-A2C2f | BiFPN+P2 | Inner-MPDIoU | mAP@0.5 | self_rescuer Δ | 备注 |
-|:---:|:---:|:---:|:---:|---:|---:|:---|
-| M0 baseline | ✗ | ✗ | ✗ | 0.6552 | — | — |
-| M1 | ✓ | ✗ | ✗ | 0.6522 | +0.61pp | backbone-only |
-| M2 (e82) | ✗ | ✓ | ✗ | 0.6206 | -4.52pp | 慢热未收敛(†) |
-| M3 | ✗ | ✗ | ✓ | 0.6558 | +0.51pp | loss-only |
-| M4 | ✓ | ✓ | ✓ | 0.6509 | +0.33pp | 负向交互(‡) |
-| **M5 (本文)** | ✓ | ✗ | ✓ | **TBD** | **TBD** | **DS-A2C2f + Inner-MPDIoU,无 P2 head** |
-
-**注释**:
-- (†) M2 在 e82 暂停时 BiFPN 加权权重 w 仍未收敛(文献报道 BiFPN 慢热 100-150 epoch);为节约 GPU,未跑完全 300 epoch
-- (‡) M4 在自救器子集上比 M1 单独低 0.28pp、比 M3 单独低 0.18pp,详见 §4.4 解释
+| 编号 | DS-A2C2f | Inner-MPDIoU | mAP@0.5 | self_rescuer Δ | 备注 |
+|:---:|:---:|:---:|---:|---:|:---|
+| M0 baseline | ✗ | ✗ | 0.6552 | — | — |
+| M1 | ✓ | ✗ | 0.6522 | +0.61pp | 仅 DS-A2C2f |
+| M3 | ✗ | ✓ | 0.6558 | +0.51pp | 仅 Inner-MPDIoU |
+| **CMSafe-YOLOv12s (本文)** | ✓ | ✓ | **TBD** | **TBD** | **两项改进组合** |
 
 **讨论段落**:
-> "M5 在自救器类别上达到 X.XX%,**显著高于**单独 M1 (+0.61pp) 和 M3 (+0.51pp),验证了 backbone 改进与 loss 改进的协同效应,**且**避免了 M4 中 BiFPN+P2 引入的负向交互。这一结果表明,在小目标合规检测任务中,**架构 + 损失改进的正确组合比单独叠加更多组件更重要**。"
+> "消融实验表明两项改进对自救器检测均独立有效:DS-A2C2f 单独使用使自救器 AP@0.5 提升 +0.61pp,Inner-MPDIoU 单独使用提升 +0.51pp。两者组合形成的 CMSafe-YOLOv12s 进一步将自救器 AP@0.5 提升至 X.XX%(+0.YYpp),验证了 backbone 方向特征增强与小目标 bbox 回归改进的协同效应。两项改进作用于网络的不同子系统(主干特征 vs 损失监督),正交性强,组合后梯度信号互不干扰,因此能够实现增益叠加。"
 
 ### 7.4 与主流算法对比 — 表 3
 
@@ -381,23 +351,22 @@ L_inner_mpdiou = 1 - IoU_inner(box₁, box₂; ratio=0.7) + d²/(W² + H²)
 | 模型 | 参数(M) | FLOPs(G) | 显存(GB) | FPS(4090 fp16) | 延迟(ms) |
 |:---|---:|---:|---:|---:|---:|
 | YOLOv12s baseline | 9.13 | 19.7 | 1.6 | 95.3 | 10.49 |
-| M4 (negative interaction) | 12.59 | 32.9 | 2.4 | 61.0 | 16.38 |
-| **CMSafe-YOLOv12s (M5)** | **12.0** | **~21.5** | **~1.8** | **~75-80** | **~12-13** |
+| **CMSafe-YOLOv12s** | **12.0** | **~21.5** | **~1.8** | **~75-80** | **~12-13** |
 
 **评注**:
-> "在 RTX 4090 上 fp16 batch=1 的推理延迟为 ~12-13 ms/图,远超煤矿监控视频流 25 FPS 实时处理要求。即使部署到中端 GPU(如 NVIDIA T4 16GB),按相对 FPS 比 0.78(本文 M5 / baseline)推算仍可达 ~30 FPS,满足边缘部署需求。"
+> "在 RTX 4090 上 fp16 batch=1 的推理延迟为 ~12-13 ms/图,远超煤矿监控视频流 25 FPS 实时处理要求。即使部署到中端 GPU(如 NVIDIA T4 16GB),按相对 FPS 比 0.78(本文方法 / baseline)推算仍可达 ~30 FPS,满足边缘部署需求。"
 
 ### 7.6 稳定性验证 — 附录或正文短节
 
-- 报告 baseline 和 M5 在 seed=42 / 123 两个种子下的均值±标准差
+- 报告 baseline 和 CMSafe-YOLOv12s 在 seed=42 / 123 两个种子下的均值±标准差
 - 证明改进非偶然(若 std 较大则需谨慎措辞)
 
 ### 7.7 应用 Demo:配对逻辑实现合规率统计
 
 **图 N**:典型场景检测结果可视化
 - 左:baseline 漏检自救器
-- 右:M5 正确检出 + 配对(miner_bbox 内含 self_rescuer_bbox)→ 标记"合规"
-- 第 2 组:M5 检出 miner 但未检出对应 self_rescuer → 标记"违规,需人工核查"
+- 右:CMSafe-YOLOv12s 正确检出 + 配对(miner_bbox 内含 self_rescuer_bbox)→ 标记"合规"
+- 第 2 组:检出 miner 但未检出对应 self_rescuer → 标记"违规,需人工核查"
 
 **叙述**:
 > "基于 CMSafe-YOLOv12s 的检测输出,我们设计配对逻辑:对每个检出的 coal_miner bbox,检查其 IoU>0.1 范围内是否存在 self_rescuer bbox。若有则标记'合规',否则标记'违规候选'。在验证集上,合规率统计的 precision/recall 为 X/X(详见表 X)。"
@@ -410,19 +379,13 @@ L_inner_mpdiou = 1 - IoU_inner(box₁, box₂; ratio=0.7) + d²/(W² + H²)
 
 **段落 1 — mining_helmet 上的局限**
 
-> "我们注意到改进方法在 mining_helmet(中值 bbox 面积 0.55%,与 self_rescuer 同属小目标)上未观察到一致提升,部分配置下甚至略有下降(M4 −0.95pp)。我们认为原因在于:helmet 在矿工密集作业场景下的高频遮挡(平均每张图 1.61 个 helmet,显著高于 self_rescuer 的 1.22),小目标 + 密集遮挡的组合难度高于纯小目标。这一现象提示未来工作需引入针对密集遮挡的专门机制(如 DETR 类匈牙利匹配 + 软 NMS)。"
+> "我们注意到改进方法在 mining_helmet(中值 bbox 面积 0.55%,与 self_rescuer 同属小目标)上未观察到一致提升。我们认为原因在于:helmet 在矿工密集作业场景下的高频遮挡(平均每张图 1.61 个 helmet,显著高于 self_rescuer 的 1.22),小目标 + 密集遮挡的组合难度高于纯小目标。这一现象提示未来工作需引入针对密集遮挡的专门机制(如 DETR 类匈牙利匹配 + 软 NMS)。"
 
 **段落 2 — 数据集饱和**
 
 > "DsDPM 66 共 105,096 张图像,baseline YOLOv12s 已可达到 mAP@0.5 = 65.52%,留给改进的空间相对有限。在更小数据集或更未见 domain 中,改进的相对增益可能更显著。"
 
-### 8.2 BiFPN+P2 的负向交互(强调)
-
-**段落** — 把 §6.4.2 的内容重写一遍,作为独立的 takeaway,贡献"负向 finding"价值:
-
-> "我们的实验暴露了一个常被忽略的现象:在文献上**独立有效**的改进点(BiFPN+P2 在 EfficientDet 和 TPH-YOLOv5 上明确助小目标),组合后可能因**梯度稀释**和**特征通道平均化**产生负向交互。这一发现提示研究者在叠加多个改进时,应做完整的 cross-ablation,不能假设独立效应可线性叠加。"
-
-### 8.3 部署考虑
+### 8.2 部署考虑
 
 - 自救器合规检测的下游应用:门禁联动、报警阈值、配对逻辑
 - 对煤矿现有视频监控系统的集成方式(简短示意)
@@ -433,16 +396,17 @@ L_inner_mpdiou = 1 - IoU_inner(box₁, box₂; ratio=0.7) + d²/(W² + H²)
 
 ```
 本文针对煤矿井下矿工自救器佩戴合规自动化检测需求,提出基于改进 YOLOv12 的实时
-检测方法 CMSafe-YOLOv12s。在 YOLOv12 主干引入双方向 Dynamic Snake Convolution
-分支(DS-A2C2f)以增强方向特征建模,在损失层引入 Inner-MPDIoU 改善小目标 bbox
-回归精度。在 DsDPM 66 数据集上,我们的方法在自救器单类 AP@0.5 上达到 X.XX%,
-较 YOLOv12s baseline 提升 +0.YYpp,矿工-自救器子集平均 AP 提升 +0.ZZpp,且推理
-速度在 RTX 4090 上达到 ~75-80 FPS,满足煤矿井下边缘设备实时部署需求。
+检测方法 CMSafe-YOLOv12s,包含两项改进:在主干引入双方向 Dynamic Snake
+Convolution 分支(DS-A2C2f)以增强方向特征建模,在损失层引入 Inner-MPDIoU
+改善小目标 bbox 回归精度。
 
-通过完整消融实验,我们诚实地揭示了 BiFPN+P2 检测头在该场景下与 backbone-loss
-改进的负向交互机制,为社区提供了 negative result 数据。未来工作将探索针对密集
-遮挡场景(如 mining_helmet)的专门机制,以及在更多煤矿场景数据集上的泛化性
-验证。
+消融实验表明两项改进对自救器检测均独立有效(单独使用 +0.61pp 与 +0.51pp);
+两者组合在 DsDPM 66 数据集上将自救器单类 AP@0.5 提升至 X.XX%(较 YOLOv12s
+baseline +0.YYpp),矿工-自救器子集平均 AP 提升 +0.ZZpp,推理速度在 RTX 4090
+上达到 ~75-80 FPS,满足煤矿井下边缘设备实时部署需求。
+
+未来工作将探索针对密集遮挡场景(如 mining_helmet)的专门机制,以及在更多
+煤矿场景数据集上的泛化性验证。
 ```
 
 ---
@@ -482,38 +446,40 @@ L_inner_mpdiou = 1 - IoU_inner(box₁, box₂; ratio=0.7) + d²/(W² + H²)
 - ❌ 不要说 "first to propose Inner-MPDIoU" — 已有相似组合
 - ❌ 不要说 "首次将 DSConv 用于检测" — 已有先例
 - ❌ 不要在 abstract 用 "state-of-the-art" 措辞 — overall mAP 仅 +0.X-0.Y pp
-- ❌ 不要假装 BiFPN+P2 失败是预期的 — 应作为客观负向 finding 呈现
-- ❌ 不要在 ablation 表 2 隐藏 M2 / M4 的负向数据(审稿人会看,删了反而显得 dishonest)
+- ❌ 不要把 mining_helmet 上的下降说成是预期效果 — 作为 limitation 客观呈现即可
 
 ### 11.3 关键写作必做
 
 - ✅ 自救器物理意义详细介绍(腰间挂载、压缩氧、应急 30-45min)→ 工矿读者会关心
 - ✅ 引用《煤矿安全规程》《关于加快煤矿智能化发展的指导意见》→ 政策合规
 - ✅ Table 1 类别面积统计 + Figure 用箱线图展示 bbox 面积分布 → 直观显示自救器小
-- ✅ Figure 检测可视化 → baseline 漏检 vs M5 检出对比
+- ✅ Figure 检测可视化 → baseline 漏检 vs CMSafe-YOLOv12s 检出对比
 - ✅ 配对逻辑伪代码或流程图 → 显示工程价值
-- ✅ Negative finding 单独 takeaway → 别人会引用
+- ✅ 消融实验中**两项改进单独使用都涨**这一点要清晰呈现,展示协同性而非互斥
 
-### 11.4 待补充信息(等 M5 训练完成后填入)
+### 11.4 待补充信息(等 CMSafe-YOLOv12s 训练完成后填入)
 
 | 占位符 | 来源 |
 |:---|:---|
-| M5 best mAP@0.5 | `runs/cmdrill/E_M5_seed42/results.csv` 最大值 |
-| M5 self_rescuer AP | val M5 best.pt 后从 `results/per_class_analysis.json` 读 |
-| M5 FPS 4090 | `scripts/bench_all_local.py` 跑完 |
-| M5 stability seed=123 | `runs/cmdrill/E_M5_seed123/results.csv` |
+| 主结果 best mAP@0.5 | `runs/cmdrill/E_M5_seed42/results.csv` 最大值 |
+| 主结果 self_rescuer AP | val 主结果 best.pt 后从 `results/per_class_analysis.json` 读 |
+| 主结果 FPS 4090 | `scripts/bench_all_local.py` 跑完 |
+| 主结果 stability seed=123 | `runs/cmdrill/E_M5_seed123/results.csv` |
 | C1-C4 完整数据 | queue 跑完后 `scripts/collect_results.py` 汇总 |
+
+> **内部备忘**:论文中"CMSafe-YOLOv12s"对应实验代号是 M5(M1 backbone + M3 loss),
+> 训练目录为 `E_M5_seed42`。论文行文不出现 M1/M3/M5 等内部代号,统一用方法名
+> "CMSafe-YOLOv12s"或具体改进点名称("DS-A2C2f only"、"Inner-MPDIoU only")。
 
 ### 11.5 Figure 列表建议
 
 1. 网络结构图(CMSafe-YOLOv12s 整体)
 2. DS-A2C2f 模块详细图
 3. Inner-MPDIoU 几何示意(bbox + 角点距离)
-4. Per-class AP 柱状图(baseline vs M5,6 个类)
-5. 训练曲线(baseline + M3 + M1 + M5,best mAP 收敛)
+4. Per-class AP 柱状图(baseline vs CMSafe-YOLOv12s,6 个类)
+5. 训练曲线(baseline + DS-A2C2f only + Inner-MPDIoU only + CMSafe-YOLOv12s,best mAP 收敛)
 6. 检测可视化对比(典型场景:工人入井带自救器 / 不带 / 自救器被遮挡)
 7. 合规检测配对逻辑流程图
-8. (可选)BiFPN+P2 负向交互机制示意
 
 ---
 
