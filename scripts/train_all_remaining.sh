@@ -49,9 +49,20 @@ check_regression  "E_M1_seed42"
 log "E_M4_seed42"          && bash scripts/train_ablation.sh  M4 42  2>&1 | tee "$LOG/E_M4_seed42.log"
 check_regression  "E_M4_seed42"
 
+# === Session 6 paper pivot (self-rescuer compliance detection) ===
+# M5 = M1 architecture (DS-A2C2f) + M3 loss (Inner-MPDIoU), no BiFPN+P2.
+# Per per-class analysis: M1 alone +0.61pp on self_rescuer, M3 alone +0.51pp on self_rescuer,
+# but M4 (combined with BiFPN+P2) drops both due to P2 head gradient dilution.
+# M5 keeps the two improvements that compound and drops the one that interferes.
+# Expected: self_rescuer +0.7-1.0pp, overall ±0.2pp. This is the paper's recommended config.
+log "E_M5_seed42"          && bash scripts/train_ablation.sh  M5 42  2>&1 | tee "$LOG/E_M5_seed42.log"
+check_regression  "E_M5_seed42"
+
 # Stability seeds
 log "E0_yolov12s_seed123"  && bash scripts/train_baseline.sh      123 2>&1 | tee "$LOG/E0_s123.log"
-log "E_M4_seed123"         && bash scripts/train_ablation.sh  M4 123 2>&1 | tee "$LOG/E_M4_seed123.log"
+# E_M4_seed123 SKIPPED (Session 6 pivot): M4 is not the paper's main result, it's used in
+# the ablation as the negative-interaction case. Stability seed instead validates M5 below.
+log "E_M5_seed123"         && bash scripts/train_ablation.sh  M5 123 2>&1 | tee "$LOG/E_M5_seed123.log"
 
 # YOLO-family comparisons (base env, ultralytics native).
 # Note: ultralytics ships yolo11s.yaml (not yolov11s.yaml) and rtdetr-l.yaml

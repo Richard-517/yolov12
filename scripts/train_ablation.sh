@@ -23,6 +23,11 @@ case "${VARIANT}" in
     M2)  CFG="configs/yolov12s_M2_bifpn.yaml";   IOU="ciou";          RATIO=0.7; WARMUP=0 ;;
     M3)  CFG="yolov12s.yaml";                    IOU="inner_mpdiou";  RATIO=0.7; WARMUP=10 ;;
     M4)  CFG="configs/yolov12s_M4_ours.yaml";    IOU="inner_mpdiou";  RATIO=0.7; WARMUP=10 ;;
+    # M5 (Session 6 — pivot to self-rescuer compliance paper):
+    # = M1 architecture (DS-A2C2f at backbone P4/P5) + M3 loss (Inner-MPDIoU).
+    # NO BiFPN+P2 (M4 showed P2 head dilutes gradient and undermines combined gains).
+    # Expected: self_rescuer +0.7-1.0pp, overall ±0.2pp. Recommended final config.
+    M5)  CFG="configs/yolov12s_M1_dsa2c2f.yaml"; IOU="inner_mpdiou";  RATIO=0.7; WARMUP=10 ;;
     # WIoU v3 backup variants (CMDrill-YOLOv12 Session 5).
     # If M3/M4 with Inner-MPDIoU don't improve, swap iou_type='wiou' (same arch).
     M3W) CFG="yolov12s.yaml";                    IOU="wiou";          RATIO=0.7; WARMUP=0 ;;
