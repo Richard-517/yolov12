@@ -1,10 +1,18 @@
-# CMDrill-YOLOv12 训练监控指南(Monitor Agent CLAUDE.md)
+# CMSafe-YOLOv12 训练监控指南(Monitor Agent CLAUDE.md)
 
-> **你是谁**:本会话的 Claude Code 是 CMDrill-YOLOv12 课题训练队列的**自动监控代理**。用户**不会在线**,所有判断你独立做(在本文档明确的边界内)。
+> **你是谁**:本会话的 Claude Code 是 CMSafe-YOLOv12 课题(原 CMDrill,Session 6 已 pivot)训练队列的**自动监控代理**。用户**不会在线**,所有判断你独立做(在本文档明确的边界内)。
 >
-> **课题主上下文不在这里**。如需,可读 `../CLAUDE.md`(项目根 CLAUDE.md)和 `../../PROGRESS.md`。本 doc 只关注监控任务。
+> **课题主上下文不在这里**。如需,可读 `../CLAUDE.md`(项目根 CLAUDE.md v5.0)和 `../../PROGRESS.md`。本 doc 只关注监控任务。
 >
-> **本文档版本**:v1.0(2026-04-28),作者:开发会话 Claude(已退出)。
+> **本文档版本**:v1.1(2026-05-01,Session 6 课题 pivot 后小幅更新)
+>
+> ### Session 6 关键变化(必读)
+>
+> 1. **课题 pivot**:论文从"煤矿钻场异常行为检测"转为"煤矿井下矿工自救器佩戴合规检测"。监控代理无需关心 narrative 细节,**仍按原有规则监控训练状态**。
+> 2. **新增 M5 实验**:`E_M5_seed42` = M1 backbone + M3 loss(无 BiFPN+P2),是 paper 主推配置。M5 命令模板见 §6.2 新增"命令 F"(M5 失败的 fallback:目前**无简单 fallback,直接 HARD STOP**)。
+> 3. **队列顺序更新**:`M4 → M5 → E0_s123 → E_M5_s123 → C2/C3/C4 → C1`。**E_M4_seed123 已跳过**(M4 不是论文主结果)。
+> 4. **历史已完成**:E0/M3/M1 全部 PASS;E_M4 训练中(本次 pivot 后不作主推);E_M2 暂停在 e82。
+> 5. 监控代理逻辑(§4 检查命令、§5 决策树、§6 KILL fallback)**无变化**。
 
 ---
 
@@ -181,6 +189,7 @@ M4      ─┬─ best ≥ 0.6502 → 进稳定性 + 对比阶段               
 | **E_M1_seed42** | 标记 BACKBONE_DEAD,启 M4 | §6.2 命令 C |
 | **E_M4_seed42** | 启 M4W | §6.2 命令 D |
 | **E_M4W_seed42** | **全部失败,§6.4 hard stop** | §6.4 命令 E |
+| **E_M5_seed42**(Session 6 新加) | **直接 §6.4 hard stop**(无 fallback,M5 是最后王牌) | §6.4 命令 E |
 | 稳定性 / 对比 | **不 KILL**(让 patience 自然停) | — |
 
 ### 6.2 命令模板(复制-粘贴执行,不要改参数)
