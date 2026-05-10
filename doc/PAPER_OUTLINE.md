@@ -385,9 +385,9 @@ loss_iou = inner_mpdiou(pb_pixel, tb_pixel, ratio=0.7, img_wh=(640, 640))
 | 类型 | 模型 | params(M) | FLOPs(G) | overall mAP@0.5 | self_rescuer AP | coal_miner AP | FPS(4090, fp16) |
 |:---:|:---|---:|---:|---:|---:|---:|---:|
 | 两阶段 | Faster R-CNN R50 | TBD | TBD | TBD | TBD | TBD | TBD |
-| 单阶段 CNN | YOLOv8s | 11.13 | 28.4 | 0.6435 | 0.6877 | 0.5925 | TBD-FPS-C2 |
-| 单阶段 CNN | YOLOv11s | 9.42 | 21.3 | 0.6537 | 0.6980 | 0.6100 | TBD-FPS-C3 |
-| Transformer | RT-DETR-L | 31.99 | 103.5 | 0.6516 | 0.7048 | 0.6054 | TBD-FPS-C4 |
+| 单阶段 CNN | YOLOv8s | 11.13 | 28.4 | 0.6435 | 0.6877 | 0.5925 | 214.1 |
+| 单阶段 CNN | YOLOv11s | 9.42 | 21.3 | 0.6537 | 0.6980 | 0.6100 | 155.7 |
+| Transformer | RT-DETR-L | 31.99 | 103.5 | 0.6516 | 0.7048 | 0.6054 | 51.1 |
 | Attention-centric (baseline) | YOLOv12s | 9.10 | 19.59 | 0.6552 | 0.7032 | 0.6016 | 96.0 |
 | **本文方法** | **CMSafe-YOLOv12s** | **9.10** | **19.59** | **0.6557** | **0.7083** | **0.6048** | **101.4** |
 
