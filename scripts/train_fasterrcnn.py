@@ -26,6 +26,7 @@ import yaml
 from PIL import Image
 from torch.optim.lr_scheduler import MultiStepLR
 from torchvision.models.detection import fasterrcnn_resnet50_fpn
+from torchmetrics.detection.mean_ap import MeanAveragePrecision  # fail-fast: ensure available before training
 
 
 class DsDPM66Dataset(torch.utils.data.Dataset):
