@@ -384,14 +384,14 @@ loss_iou = inner_mpdiou(pb_pixel, tb_pixel, ratio=0.7, img_wh=(640, 640))
 
 | 类型 | 模型 | params(M) | FLOPs(G) | overall mAP@0.5 | self_rescuer AP | coal_miner AP | FPS(4090, fp16) |
 |:---:|:---|---:|---:|---:|---:|---:|---:|
-| 两阶段 | Faster R-CNN R50 | TBD | TBD | TBD | TBD | TBD | TBD |
+| 两阶段 | Faster R-CNN R50 | 41.33 | 133.95 | 0.5544 | 0.4689 | 0.4153 | 57.1 (fp32) |
 | 单阶段 CNN | YOLOv8s | 11.13 | 28.4 | 0.6435 | 0.6877 | 0.5925 | 214.1 |
 | 单阶段 CNN | YOLOv11s | 9.42 | 21.3 | 0.6537 | 0.6980 | 0.6100 | 155.7 |
 | Transformer | RT-DETR-L | 31.99 | 103.5 | 0.6516 | 0.7048 | 0.6054 | 51.1 |
 | Attention-centric (baseline) | YOLOv12s | 9.10 | 19.59 | 0.6552 | 0.7032 | 0.6016 | 96.0 |
 | **本文方法** | **CMSafe-YOLOv12s** | **9.10** | **19.59** | **0.6557** | **0.7083** | **0.6048** | **101.4** |
 
-> **C1 (Faster R-CNN R50):** 因 torchvision pipeline 与 YOLO 系不同,首次启动时因 torchmetrics 依赖缺失 epoch 1 末崩溃,修复后已重启训练(36 epoch / batch=8 / SGD-1e-3 / 1x schedule),正在跑,预计 ~16h 完成。完成后将填入此行并重测 self_rescuer per-class AP。
+> **C1 (Faster R-CNN R50):** torchvision pipeline,36 epoch / batch=8 / SGD-1e-3 / 1x schedule。**best epoch 25 mAP50=0.5544 / mAP50-95=0.4375**;epoch 26 之后开始 overfit(loss 持续下降但 val mAP 单调下降至 epoch 36 mAP50=0.5055)。**self_rescuer AP=46.89% 显著低于 CMSafe-YOLOv12s 的 70.83%(−23.94pp)**,coal_miner AP=41.53% vs 60.48%(−18.95pp),说明两阶段 R-CNN 框架在自救器极小目标(中值 bbox 面积 0.31%)上未能与 YOLO 系实时检测器抗衡。本机 4090 bench(fp32 batch=1, imgsz=640):41.33M params / 133.95 GFLOPs / 57.1 FPS(其余 YOLO 系列以 fp16 测,Faster R-CNN torchvision 实现不稳定支持 fp16 推理,统一以 fp32 上报)。
 
 **关键观察**(写论文时要突出):
 - **CMSafe-YOLOv12s 与 YOLOv12s baseline 参数量与 FLOPs 完全相同**(9.10M params, 19.59 GFLOPs),但 self_rescuer AP 提升 +0.51pp,coal_miner AP 提升 +0.32pp,overall mAP 同时提升 +0.05pp(均为正向)
@@ -399,6 +399,7 @@ loss_iou = inner_mpdiou(pb_pixel, tb_pixel, ratio=0.7, img_wh=(640, 640))
 - 与 YOLOv11s(9.42M, 21.3 GFLOPs)对比:CMSafe-YOLOv12s 参数量更少,self_rescuer AP 高出 **+1.03pp**(70.83 vs 69.80)
 - 与 YOLOv8s(11.13M, 28.4 GFLOPs)对比:CMSafe-YOLOv12s 参数量减少 18%,FLOPs 减少 31%,self_rescuer AP 高出 **+2.06pp**(70.83 vs 68.77)
 - 与 RT-DETR-L(31.99M, 103.5 GFLOPs)对比:CMSafe-YOLOv12s 参数量仅为其 28%,FLOPs 仅为 19%,但 self_rescuer AP 仍高 **+0.35pp**(70.83 vs 70.48),证明**在自救器极小目标场景下,轻量化损失改进可超越重量级 Transformer 检测器的架构红利**
+- 与 Faster R-CNN R50(41.33M, 133.95 GFLOPs)对比:CMSafe-YOLOv12s 参数量仅为其 22%,FLOPs 仅为 15%,self_rescuer AP 高出 **+23.94pp**(70.83 vs 46.89),overall mAP 高出 **+10.13pp**(65.57 vs 55.44),FPS 高 **1.8×**(101.4 vs 57.1),证明**两阶段 anchor-based R-CNN 在自救器极小目标场景下整体劣势明显**
 
 ### 7.4 部署研究(Deployment Study) — 论文核心,占 1.5-2 页 ★
 
@@ -598,9 +599,9 @@ TensorRT 引擎结合的端到端部署优化。
 
 | 占位符 | 来源 | 状态 |
 |:---|:---|:---|
-| Table 2 中 C1 (Faster R-CNN R50) 行 | `runs/cmdrill/C1_fasterrcnn/`,scp `best.pt` 后用 `train_fasterrcnn.py` 内 evaluate_map 输出的 `metrics_*.json` | ⏳ 训练中 (epoch 1/36 起步,2026-05-10 04:14 启动) |
+| Table 2 中 C1 (Faster R-CNN R50) 行 | `runs/cmdrill/C1_fasterrcnn/results.json` best epoch 25,本机 `scripts/bench_c1_local.py` 实测 params/FLOPs/FPS | ✅(2026-05-11 完成,best mAP50=0.5544 / self_rescuer AP=0.4689) |
 | Table 2 中 C2/C3/C4 行已填 self_rescuer/coal_miner/overall AP + params + FLOPs | `results/C2_yolov8s_seed42.json` / `results/C3_yolo11s_seed42.json` / `results/C4_rtdetr_l_seed42.json`(2026-05-10 跑完) | ✅ |
-| Table 2 / Table 4 中 C2/C3/C4 的 FPS 列(本机 4090) | `results_local/fps_4090.csv`(`scripts/bench_comparison_local.py` 输出) | ⏳ 本地 bench 中 |
+| Table 2 / Table 4 中 C2/C3/C4 的 FPS 列(本机 4090) | `results_local/fps_4090.csv`(`scripts/bench_comparison_local.py` 输出,2026-05-11) | ✅(C2 214.1 / C3 155.7 / C4 51.1 FPS) |
 | §7.4 ONNX 导出实测 | 用 `model.export(format='onnx')` | ⏳ 可选,论文紧迫则跳过 |
 | 国家矿山安监局 2024 事故统计 | 公开年报 | ⏳ 写作时查 |
 | 引用文献完整 GB/T 7714 格式 | 需写作时查中文核心期刊格式 | ⏳ 写作时查 |
